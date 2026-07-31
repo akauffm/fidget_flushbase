@@ -84,9 +84,9 @@
                     <span class="text-gray-200">Deliver to <strong class="text-white font-semibold">SF Bay
                             Outfall</strong></span>
                 </div>
-                <div class="flex items-center gap-2">
+                <div id="top-nav-tracking-container" class="hidden flex items-center gap-2">
                     <span class="text-gray-300 text-[11px] font-mono">Tracking ID: <span
-                            class="text-yellow-300">FLUSH-94103-2026-X</span></span>
+                            id="top-nav-tracking-id" class="text-yellow-300 font-bold"></span></span>
                 </div>
             </div>
         </div>
@@ -920,6 +920,8 @@
             const landingBanner = document.getElementById('landing-banner');
             const liveTrackingSections = document.getElementById('live-tracking-sections');
             const badge = document.getElementById('flush-id-badge');
+            const topNavContainer = document.getElementById('top-nav-tracking-container');
+            const topNavIdEl = document.getElementById('top-nav-tracking-id');
 
             if (activeFlushId) {
                 // User IS tracking a flush: Show live tracking, hide landing banner
@@ -930,6 +932,9 @@
                     badge.innerHTML = `<i class="fa-solid fa-qrcode mr-1"></i> ${activeFlushId}`;
                     badge.classList.remove('hidden');
                 }
+
+                if (topNavContainer) topNavContainer.classList.remove('hidden');
+                if (topNavIdEl) topNavIdEl.textContent = activeFlushId;
 
                 const inputEl = document.getElementById('tracking-input');
                 if (inputEl) inputEl.value = activeFlushId;
@@ -963,9 +968,10 @@
                 // Poll every 2 seconds for position updates
                 setInterval(updateRealtimeTrackingUI, 2000);
             } else {
-                // User is NOT tracking a flush: Show Landing Banner, hide live tracking sections
+                // User is NOT tracking a flush: Show Landing Banner, hide live tracking sections & top tracking ID
                 if (landingBanner) landingBanner.classList.remove('hidden');
                 if (liveTrackingSections) liveTrackingSections.classList.add('hidden');
+                if (topNavContainer) topNavContainer.classList.add('hidden');
             }
         }
 
