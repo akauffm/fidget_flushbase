@@ -663,15 +663,17 @@
     </div>
 
     <script>
-        // Geographic path coordinates with updated outfall at 37.75037559393314, -122.37329860682091
+        // Geographic path coordinates updated with user route points + final SF Bay Deepwater Outfall
         const sewerPathCoordinates = [
-            [37.7667, -122.4170],   // 1. 1417 15th St (Origin)
-            [37.7672, -122.4125],   // 2. 15th St towards Mission
-            [37.7690, -122.4080],   // 3. 15th & Division Channel Basin intake
-            [37.7670, -122.4010],   // 4. Channel Basin Trunk Line
-            [37.7560, -122.3950],   // 5. Bayview conduit route
-            [37.7431, -122.3880],   // 6. Southeast Wastewater Treatment Plant (SEP)
-            [37.75037559393314, -122.37329860682091] // 7. Deepwater Outfall in SF Bay (Updated Coords)
+            [37.7666712, -122.4168153], // 1. 1417 15th St (Origin)
+            [37.7666118, -122.4176682], // 2. 15th St lateral segment
+            [37.7481885, -122.4159071], // 3. Mission / Bernal flow corridor
+            [37.7482562, -122.4083325], // 4. Channel Basin trunk conduit
+            [37.7495458, -122.4035045], // 5. Islais Creek basin corridor
+            [37.7496816, -122.3972817], // 6. Evans Ave approach
+            [37.7472386, -122.3961013], // 7. Phelps St headworks entrance
+            [37.7431662, -122.3886129], // 8. Southeast Wastewater Treatment Plant (SEP)
+            [37.75037559393314, -122.37329860682091] // 9. SF Bay Deepwater Outfall (800 ft offshore near Pier 80)
         ];
 
         // Step definitions with realistic hydraulic timing (15 min transit, 24 hr liquid treatment)
@@ -695,7 +697,7 @@
                 eta: "~10 min to SEP, ~24 hr to Bay",
                 distance: "1.2 miles",
                 progressWidth: "38%",
-                coordsIndex: 2,
+                coordsIndex: 3,
                 icon: '🌊',
                 velocity: '~3.8 ft/sec (Trunk Line)',
                 location: '15th & Mission St Main Trunk'
@@ -707,7 +709,7 @@
                 eta: "~24 Hours (Liquid Disinfection Cycle)",
                 distance: "3.2 miles",
                 progressWidth: "68%",
-                coordsIndex: 5,
+                coordsIndex: 7,
                 icon: '🧪',
                 velocity: '24-Hour Biological Digestion',
                 location: 'SEP Plant (750 Phelps St)'
@@ -719,7 +721,7 @@
                 eta: "Discharged (24 Hr Complete)",
                 distance: "3.8 miles",
                 progressWidth: "100%",
-                coordsIndex: 6,
+                coordsIndex: 8,
                 icon: '💧',
                 velocity: 'Deepwater Outfall Release',
                 location: 'SF Bay Outfall (37.7504, -122.3733)'
@@ -758,7 +760,7 @@
                     statusDesc: "Liquid waste accelerates down the Mission District grade through the Channel Basin combined sewer main. Dissolved nutrients and fluids move continuously towards the Southeast Treatment Plant (SEP) without settling.",
                     eta: "~8 min to SEP, ~14 hr to Bay",
                     distance: "1.2 miles",
-                    coordsIndex: 2,
+                    coordsIndex: 3,
                     icon: '🌊',
                     velocity: '~4.2 ft/sec (Trunk Flow)',
                     location: '15th & Mission St Main Trunk'
@@ -769,7 +771,7 @@
                     statusDesc: "At 750 Phelps St, liquid wastewater bypasses heavy sludge settling and enters aerobic aeration basins. Microorganisms break down dissolved organics, followed by sodium hypochlorite disinfection in a ~10-14 hour retention cycle.",
                     eta: "~12-14 Hours (Disinfection Cycle)",
                     distance: "3.2 miles",
-                    coordsIndex: 5,
+                    coordsIndex: 7,
                     icon: '🧪',
                     velocity: '12-14 Hr Biological Aeration & Chlorine Contact',
                     location: 'SEP Plant (750 Phelps St)'
@@ -780,7 +782,7 @@
                     statusDesc: "Disinfected, high-clarity liquid effluent is pumped through the deepwater outfall near Pier 80 (37.7504, -122.3733) into the deep Bayside channel, safely merging into San Francisco Bay currents.",
                     eta: "Discharged (Treatment Complete)",
                     distance: "3.8 miles",
-                    coordsIndex: 6,
+                    coordsIndex: 8,
                     icon: '💧',
                     velocity: 'Deepwater Outfall Release',
                     location: 'SF Bay Outfall Pier 80 (37.7504, -122.3733)'
@@ -804,7 +806,7 @@
                     statusDesc: "Solid matter travels along the invert of the Channel Basin trunk line. Upon arrival at SEP headworks, automated bar screens catch coarse non-biodegradable debris while organic solids proceed to primary tanks.",
                     eta: "~10 min to SEP, multi-week digestion",
                     distance: "1.2 miles",
-                    coordsIndex: 2,
+                    coordsIndex: 3,
                     icon: '🧱',
                     velocity: '~3.5 ft/sec (Sediment Transport)',
                     location: 'Channel Basin Main & Headworks'
@@ -815,7 +817,7 @@
                     statusDesc: "Heavy organic solids settle into primary sludge in large clarifiers at 750 Phelps St. Sludge is pumped into anaerobic digesters heated to 98°F where microbes break down solids over 38 days into biogas and Class A biosolids.",
                     eta: "~38 Days (Biosolids Processing)",
                     distance: "3.2 miles",
-                    coordsIndex: 5,
+                    coordsIndex: 7,
                     icon: '⚙️',
                     velocity: '38-Day Anaerobic Thermophilic Digestion',
                     location: 'SEP Anaerobic Digesters (750 Phelps St)'
@@ -826,7 +828,7 @@
                     statusDesc: "Liquid portion discharges safely into SF Bay at Pier 80 outfall. The digested organic solids are dewatered into nutrient-rich Class A biosolids and recycled as agricultural fertilizer for California soil!",
                     eta: "Recycled Biosolids & Bay Release",
                     distance: "3.8 miles",
-                    coordsIndex: 6,
+                    coordsIndex: 8,
                     icon: '🌱',
                     velocity: 'Outfall Release & Agricultural Recycling',
                     location: 'SF Bay Outfall (Pier 80) & Agricultural Dist.'
@@ -887,7 +889,7 @@
                 iconSize: [28, 28],
                 iconAnchor: [14, 14]
             });
-            mainSepPin = L.marker(sewerPathCoordinates[5], { icon: plantIcon }).addTo(mainMap)
+            mainSepPin = L.marker(sewerPathCoordinates[7], { icon: plantIcon }).addTo(mainMap)
                 .bindPopup("<b>Southeast Treatment Plant (SEP)</b><br>750 Phelps St, SF");
 
             // Outfall Pin
@@ -950,7 +952,7 @@
                 iconSize: [28, 28],
                 iconAnchor: [14, 14]
             });
-            simSepPin = L.marker(sewerPathCoordinates[5], { icon: plantIcon }).addTo(simMap);
+            simSepPin = L.marker(sewerPathCoordinates[7], { icon: plantIcon }).addTo(simMap);
 
             // Bay Outfall Pin
             updateBayOutfallMarker(simMap, false, (pin) => simEndPin = pin);
