@@ -1232,6 +1232,13 @@
                 return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
             }
 
+            function formatLogDateAndTime(ms) {
+                const d = new Date(ms);
+                const dateStr = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+                const timeStr = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+                return `${dateStr}, ${timeStr}`;
+            }
+
             const t0 = baseMs;                      // Flush timestamp (0 min)
             const t1 = baseMs + 2 * 60 * 1000;       // Street main (2 min)
             const t2 = baseMs + 8 * 60 * 1000;       // Trunk line (8 min)
@@ -1245,9 +1252,9 @@
                 stepIndex >= 1 ? formatLogTime(t1) : `Est. ${formatLogTime(t1)}`,
                 stepIndex >= 1 ? formatLogTime(t2) : `Est. ${formatLogTime(t2)}`,
                 stepIndex >= 2 ? `${formatLogTime(t3)} (15 Min Transit)` : `Est. ${formatLogTime(t3)} (15 Min Transit)`,
-                stepIndex >= 2 ? (stepIndex === 3 ? `Completed ${formatLogTime(t4)}` : `IN PROGRESS (Started ${formatLogTime(t4)})`) : `Pending (~15m Mark)`,
-                stepIndex >= 2 ? (stepIndex === 3 ? `Completed ${formatLogTime(t5)}` : `Pending (~24 Hr Mark)`) : `Pending (~24 Hr Mark)`,
-                stepIndex >= 3 ? `Discharged ${formatLogTime(t6)}` : `Pending (Est. ${formatLogTime(t6)})`
+                stepIndex >= 2 ? (stepIndex === 3 ? `Completed ${formatLogDateAndTime(t4)}` : `IN PROGRESS (Started ${formatLogTime(t4)})`) : `Pending (~15m Mark)`,
+                stepIndex >= 2 ? (stepIndex === 3 ? `Completed ${formatLogDateAndTime(t5)}` : `Pending (${formatLogDateAndTime(t5)})`) : `Pending (${formatLogDateAndTime(t5)})`,
+                stepIndex >= 3 ? `Discharged ${formatLogDateAndTime(t6)}` : `Pending (Est. ${formatLogDateAndTime(t6)})`
             ];
 
             for (let j = 0; j < 7; j++) {
