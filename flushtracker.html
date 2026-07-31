@@ -38,6 +38,10 @@
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <!-- FontAwesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Firebase SDK Compat libraries for online real-time tracking -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="firebase_config.js"></script>
     <style>
         /* Custom scrollbar & leafet overrides */
         #map {
@@ -102,8 +106,9 @@
                             class="text-xs bg-green-100 text-amazon-green px-2 py-0.5 rounded-full font-semibold border border-green-200 inline-block">ON
                             TIME</span>
                     </h1>
-                    <p class="text-xs text-gray-500 mt-0.5">
-                        Origin: <span class="font-medium text-gray-700">1417 15th St, San Francisco, CA 94103</span>
+                    <p class="text-xs text-gray-500 mt-0.5 flex flex-wrap items-center gap-2">
+                        <span>Origin: <span class="font-medium text-gray-700">1417 15th St, San Francisco, CA 94103</span></span>
+                        <span id="flush-id-badge" class="hidden text-[10px] bg-blue-100 text-amazon-blue px-2 py-0.5 rounded font-mono font-bold border border-blue-200 shadow-sm"></span>
                     </p>
                 </div>
                 <!-- Thumbnail preview icon -->
@@ -841,7 +846,141 @@
             initSimMap();
             setStep(trackingStep);
             resetSimToUnstarted();
+            initFlushTracking();
         });
+
+        // --- Real-time Flush Tracking Engine ---
+        let activeFlushId = null;
+        let activeFlushData = null;
+
+        // Linear interpolation helper between two lat/lng coordinates
+        function interpolateCoord(coord1, coord2, factor) {
+            return [
+                coord1[0] + (coord2[0] - coord1[0]) * factor,
+                coord1[1] + (coord2[1] - coord1[1]) * factor
+            ];
+        }
+
+        // Interpolate along multi-point coordinate path array
+        function interpolatePath(points, progressRatio) {
+            if (!points || points.length === 0) return sewerPathCoordinates[0];
+            if (points.length === 1 || progressRatio <= 0) return points[0];
+            if (progressRatio >= 1) return points[points.length - 1];
+
+            const totalSegments = points.length - 1;
+            const targetSegmentFloat = progressRatio * totalSegments;
+            const segmentIdx = Math.min(Math.floor(targetSegmentFloat), totalSegments - 1);
+            const segmentFactor = targetSegmentFloat - segmentIdx;
+
+            return interpolateCoord(points[segmentIdx], points[segmentIdx + 1], segmentFactor);
+        }
+
+        function initFlushTracking() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const urlFlushId = urlParams.get('id');
+            if (urlFlushId) {
+                activeFlushId = urlFlushId.trim().toUpperCase();
+            }
+
+            const badge = document.getElementById('flush-id-badge');
+            if (badge && activeFlushId) {
+                badge.innerHTML = `<i class="fa-solid fa-qrcode mr-1"></i> ${activeFlushId}`;
+                badge.classList.remove('hidden');
+            }
+
+            if (activeFlushId) {
+                // Try Firebase Firestore Document Listen
+                if (typeof firebase !== 'undefined' && firebaseConfig && firebaseConfig.projectId !== "YOUR_PROJECT_ID") {
+                    try {
+                        if (!firebase.apps.length) {
+                            firebase.initializeApp(firebaseConfig);
+                        }
+                        const db = firebase.firestore();
+                        db.collection("flushes").doc(activeFlushId).onSnapshot((doc) => {
+                            if (doc.exists) {
+                                activeFlushData = doc.data();
+                                updateRealtimeTrackingUI();
+                            } else {
+                                fetchLocalFlushFallback(activeFlushId);
+                            }
+                        }, (err) => {
+                            console.warn("Firestore error:", err);
+                            fetchLocalFlushFallback(activeFlushId);
+                        });
+                    } catch (e) {
+                        console.error("Firebase init failed:", e);
+                        fetchLocalFlushFallback(activeFlushId);
+                    }
+                } else {
+                    fetchLocalFlushFallback(activeFlushId);
+                }
+
+                // Poll every 2 seconds for position updates
+                setInterval(updateRealtimeTrackingUI, 2000);
+            }
+        }
+
+        function fetchLocalFlushFallback(id) {
+            fetch('local_flushes.json')
+                .then(res => res.json())
+                .then(data => {
+                    if (data && data[id]) {
+                        activeFlushData = data[id];
+                        updateRealtimeTrackingUI();
+                    }
+                })
+                .catch(() => {});
+        }
+
+        function updateRealtimeTrackingUI() {
+            if (!activeFlushData || !activeFlushData.timestamp) return;
+
+            const nowMs = Date.now();
+            const elapsedSec = Math.max(0, (nowMs - activeFlushData.timestamp) / 1000);
+
+            let stepIdx = 0;
+            let currentPosition = sewerPathCoordinates[0];
+            let progressPercent = 0;
+
+            if (elapsedSec < 120) {
+                // Phase 1: Lateral Pipe (0 to 2 min -> 0% to 15%)
+                stepIdx = 0;
+                const ratio = elapsedSec / 120;
+                progressPercent = ratio * 15;
+                currentPosition = interpolatePath(sewerPathCoordinates.slice(0, 3), ratio);
+            } else if (elapsedSec < 900) {
+                // Phase 2: Street Main (2 min to 15 min -> 15% to 68%)
+                stepIdx = 1;
+                const ratio = (elapsedSec - 120) / (900 - 120);
+                progressPercent = 15 + (ratio * 53);
+                currentPosition = interpolatePath(sewerPathCoordinates.slice(2, 8), ratio);
+            } else if (elapsedSec < 86400) {
+                // Phase 3: Treatment at SEP (15 min to 24 hr -> 68% to 95%)
+                stepIdx = 2;
+                const ratio = (elapsedSec - 900) / (86400 - 900);
+                progressPercent = 68 + (ratio * 27);
+                currentPosition = sewerPathCoordinates[7];
+            } else {
+                // Phase 4: SF Bay Outfall Release (> 24 hr -> 100%)
+                stepIdx = 3;
+                progressPercent = 100;
+                currentPosition = sewerPathCoordinates[8];
+            }
+
+            // Update main map marker position
+            if (mainFlushMarker) {
+                mainFlushMarker.setLatLng(currentPosition);
+            }
+
+            // Sync visual stepper node
+            setStep(stepIdx);
+
+            // Override progress fill width dynamically
+            const fillEl = document.getElementById('progress-bar-fill');
+            if (fillEl) {
+                fillEl.style.width = `${progressPercent.toFixed(1)}%`;
+            }
+        }
 
         // Initialize Main Tracking Map
         function initMainMap() {

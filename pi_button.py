@@ -1,0 +1,214 @@
+#!/usr/bin/env python3
+"""
+Raspberry Pi Flush Tracker Trigger & Receipt Generator
+------------------------------------------------------
+Listens for a physical button press on GPIO 17 (or interactive ENTER key on PC/Mac),
+creates a unique flush record in Firebase Cloud Firestore, generates a printable QR code,
+and formats an ESC/POS receipt for thermal printing.
+"""
+
+import os
+import sys
+import time
+import random
+import string
+import datetime
+import json
+import requests
+
+# Try importing qrcode for QR generation
+try:
+    import qrcode
+    QRCODE_AVAILABLE = True
+except ImportError:
+    QRCODE_AVAILABLE = False
+
+# Configuration Settings
+FIREBASE_PROJECT_ID = "YOUR_PROJECT_ID"  # Replace with your Firebase Project ID
+PUBLIC_HOST_URL = "https://your-app.web.app" # Replace with your deployed app URL (or http://<pi-ip>:8000)
+BUTTON_GPIO_PIN = 17 # GPIO pin connected to button (active low with internal pull-up)
+
+# Check GPIO Availability (Raspberry Pi vs Mac/PC Workstation)
+IS_RASPBERRY_PI = False
+try:
+    from gpiozero import Button
+    IS_RASPBERRY_PI = True
+except (ImportError, RuntimeError):
+    try:
+        import RPi.GPIO as GPIO
+        IS_RASPBERRY_PI = True
+    except (ImportError, RuntimeError):
+        IS_RASPBERRY_PI = False
+
+def generate_flush_id():
+    """Generates a unique, short tracking ID like FLUSH-4E9A12"""
+    hex_code = ''.join(random.choices('0123456789ABCDEF', k=6))
+    return f"FLUSH-{hex_code}"
+
+def save_to_firestore(flush_id, timestamp_ms, formatted_time):
+    """Writes flush document to Firebase Cloud Firestore via HTTP REST API"""
+    if FIREBASE_PROJECT_ID == "YOUR_PROJECT_ID":
+        print(" [NOTE] Firebase Project ID not configured yet. Saving flush locally to local_flushes.json.")
+        local_db_path = os.path.join(os.path.dirname(__file__), "local_flushes.json")
+        flushes = {}
+        if os.path.exists(local_db_path):
+            try:
+                with open(local_db_path, 'r') as f:
+                    flushes = json.load(f)
+            except Exception:
+                pass
+        flushes[flush_id] = {
+            "id": flush_id,
+            "timestamp": timestamp_ms,
+            "formatted_time": formatted_time,
+            "gpf": 1.6,
+            "waste_type": "liquid",
+            "origin": "1417 15th St, San Francisco, CA"
+        }
+        with open(local_db_path, 'w') as f:
+            json.dump(flushes, f, indent=2)
+        return True
+
+    # Firestore REST API endpoint
+    url = f"https://firestore.googleapis.com/v1/projects/{FIREBASE_PROJECT_ID}/databases/(default)/documents/flushes/{flush_id}"
+    payload = {
+        "fields": {
+            "timestamp": {"integerValue": str(timestamp_ms)},
+            "formatted_time": {"stringValue": formatted_time},
+            "gpf": {"doubleValue": 1.6},
+            "waste_type": {"stringValue": "liquid"},
+            "origin": {"stringValue": "1417 15th St, San Francisco, CA"}
+        }
+    }
+    
+    try:
+        response = requests.patch(url, json=payload, timeout=5)
+        if response.status_code in (200, 201):
+            print(f" Successfully committed {flush_id} to Cloud Firestore!")
+            return True
+        else:
+            print(f" Firestore HTTP Error {response.status_code}: {response.text}")
+            return False
+    except Exception as e:
+        print(f" Error connecting to Firestore API: {e}")
+        return False
+
+def generate_qr_code(tracking_url, flush_id):
+    """Generates a QR code image and terminal ASCII preview"""
+    output_dir = os.path.dirname(__file__)
+    qr_filename = os.path.join(output_dir, f"qr_{flush_id}.png")
+
+    if QRCODE_AVAILABLE:
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=10,
+            border=2,
+        )
+        qr.add_data(tracking_url)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        img.save(qr_filename)
+        print(f" QR Code saved to: {qr_filename}")
+
+        # ASCII QR Code for terminal preview
+        print("\n--- TERMINAL QR CODE PREVIEW ---")
+        qr_ascii = qrcode.QRCode(border=1)
+        qr_ascii.add_data(tracking_url)
+        qr_ascii.print_ascii(invert=True)
+    else:
+        print(f" [!] 'qrcode' library not installed. Install with: pip install qrcode[pil]")
+        print(f" Target Tracking URL: {tracking_url}")
+
+    return qr_filename
+
+def print_receipt(flush_id, formatted_time, tracking_url):
+    """Formats and prints an ESC/POS styled thermal receipt"""
+    receipt_text = f"""
+========================================
+       SAN FRANCISCO FLUSH TRACKER
+     1417 15th St ➔ Pier 80 Outfall
+========================================
+ TICKET ID:    {flush_id}
+ TIMESTAMP:    {formatted_time}
+ FLUSH TYPE:   Liquid Stream (1.6 GPF)
+ ORIGIN:       1417 15th St (Mission Dist)
+ DESTINATION:  SF Bay Outfall (800 ft)
+----------------------------------------
+ SCAN QR CODE TO TRACK YOUR FLUSH LIVE:
+
+ {tracking_url}
+----------------------------------------
+   SFPUC Bayside Sewer Infrastructure
+    Remember: Only Flush the 3 P's!
+========================================
+"""
+    print(receipt_text)
+    
+    # Save receipt copy
+    receipt_file = os.path.join(os.path.dirname(__file__), "last_receipt.txt")
+    with open(receipt_file, 'w') as f:
+        f.write(receipt_text)
+
+    # Optional: Send raw ESC/POS bytes to connected USB receipt printer (/dev/usb/lp0)
+    if os.path.exists("/dev/usb/lp0"):
+        try:
+            with open("/dev/usb/lp0", "wb") as printer:
+                printer.write(b"\x1b\x40") # ESC @ (Initialize printer)
+                printer.write(receipt_text.encode('utf-8'))
+                printer.write(b"\x1d\x56\x41\x03") # GS V (Cut paper)
+            print(" Printed receipt to USB Thermal Printer (/dev/usb/lp0)!")
+        except Exception as err:
+            print(f" Could not write to /dev/usb/lp0: {err}")
+
+def trigger_flush_event():
+    """Main workflow executed on each button push"""
+    print("\n" + "="*50)
+    print(" 🚽 BUTTON PUSH DETECTED! Generating New Flush...")
+    print("="*50)
+
+    flush_id = generate_flush_id()
+    now = datetime.datetime.now()
+    timestamp_ms = int(now.timestamp() * 1000)
+    formatted_time = now.strftime("%B %d, %Y %I:%M:%S %p %Z").strip()
+
+    # Public tracking URL
+    base_url = PUBLIC_HOST_URL.rstrip('/')
+    tracking_url = f"{base_url}/flushtracker.html?id={flush_id}"
+
+    # 1. Save to online Cloud Firestore
+    save_to_firestore(flush_id, timestamp_ms, formatted_time)
+
+    # 2. Generate QR code
+    generate_qr_code(tracking_url, flush_id)
+
+    # 3. Print thermal receipt
+    print_receipt(flush_id, formatted_time, tracking_url)
+
+def main():
+    print("==================================================")
+    print("  San Francisco FlushTracker Raspberry Pi System")
+    print("==================================================")
+
+    if IS_RASPBERRY_PI:
+        print(f" Running on Raspberry Pi! Listening on GPIO Pin {BUTTON_GPIO_PIN}...")
+        try:
+            button = Button(BUTTON_GPIO_PIN, bounce_time=0.2)
+            button.when_pressed = trigger_flush_event
+            print(" Press physical button to generate a flush. (Press Ctrl+C to exit)\n")
+            while True:
+                time.sleep(0.1)
+        except KeyboardInterrupt:
+            print("\n Exiting FlushTracker Pi listener.")
+    else:
+        print(" Running in Workstation / Development Mode.")
+        print(" Press [ENTER] in terminal to trigger a new button flush! (Ctrl+C to quit)\n")
+        try:
+            while True:
+                input(">>> Press [ENTER] to push button... ")
+                trigger_flush_event()
+        except (KeyboardInterrupt, EOFError):
+            print("\n Exiting FlushTracker Dev listener.")
+
+if __name__ == "__main__":
+    main()

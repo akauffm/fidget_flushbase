@@ -1,0 +1,7 @@
+venv/
+node_modules/
+.DS_Store
+local_flushes.json
+qr_*.png
+last_receipt.txt
+__pycache__/

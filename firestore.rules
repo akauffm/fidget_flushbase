@@ -1,0 +1,13 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // FlushTracker Flushes collection rules
+    match /flushes/{flushId} {
+      // Allow public read & creation of flush records
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if false; // Immutability for tracking logs
+    }
+  }
+}
