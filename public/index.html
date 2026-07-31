@@ -95,8 +95,42 @@
     <!-- Main Container -->
     <main class="max-w-3xl mx-auto px-3 sm:px-4 pt-4 space-y-4">
 
-        <!-- Order Header Card -->
-        <section class="bg-white rounded-xl p-4 sm:p-5 amazon-shadow border border-gray-200">
+        <!-- Landing Banner & Search Section (Shown when NOT actively tracking a flush) -->
+        <section id="landing-banner" class="bg-gradient-to-r from-amazon-navy via-slate-800 to-amazon-navy text-white rounded-xl p-5 sm:p-6 shadow-xl border border-slate-700 relative overflow-hidden">
+            <div class="absolute -right-6 -bottom-6 text-slate-700/30 text-9xl pointer-events-none select-none">🚽</div>
+            <div class="relative z-10 max-w-2xl">
+                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-yellow-400/20 text-yellow-300 text-xs font-semibold mb-3 border border-yellow-400/30 shadow-sm">
+                    <span>✨ 2026 Fidget Camp Showcase</span>
+                </div>
+                <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight text-white mb-2">
+                    SFPUC FlushTracker
+                </h1>
+                <p class="text-sm sm:text-base text-slate-200 font-medium leading-relaxed mb-3">
+                    This web app tracks what you deposited at the 2026 Fidget Camp Showcase as it makes its way from the venue to the Bay.
+                </p>
+                <p class="text-xs sm:text-sm text-yellow-300 font-medium mb-4 flex items-center gap-1.5">
+                    <i class="fa-solid fa-circle-info"></i> Enter a tracking number or scan the QR code on your receipt to get started.
+                </p>
+
+                <!-- Search / Tracking ID Input Form -->
+                <form onsubmit="submitTrackingId(event)" class="flex flex-col sm:flex-row gap-2 max-w-md">
+                    <div class="relative flex-1">
+                        <i class="fa-solid fa-qrcode absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+                        <input id="tracking-input" type="text" placeholder="Enter Tracking ID (e.g. FLUSH-4E9A12)" 
+                            class="w-full pl-9 pr-3 py-2.5 rounded-lg text-xs font-mono font-bold text-gray-900 bg-white border border-gray-300 focus:outline-none focus:ring-2 focus:ring-amazon-orange shadow-inner uppercase placeholder:font-sans placeholder:font-normal placeholder:text-gray-400">
+                    </div>
+                    <button type="submit" 
+                        class="bg-amazon-yellow hover:bg-amazon-yellowHover text-black text-xs font-bold py-2.5 px-5 rounded-lg border border-yellow-500 shadow-md flex items-center justify-center gap-2 transition-all active:scale-95 shrink-0">
+                        <i class="fa-solid fa-magnifying-glass"></i> Track Flush
+                    </button>
+                </form>
+            </div>
+        </section>
+
+        <!-- Live Tracking Sections Container (Shown when a flush is active) -->
+        <div id="live-tracking-sections" class="space-y-4">
+            <!-- Order Header Card -->
+            <section class="bg-white rounded-xl p-4 sm:p-5 amazon-shadow border border-gray-200">
             <div
                 class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-100 pb-3 gap-2">
                 <div>
@@ -456,6 +490,7 @@
                 </div>
             </div>
         </section>
+        </div> <!-- End of live-tracking-sections -->
 
         <!-- Separate Flush Simulator Section at Bottom -->
         <section id="simulator-section"
@@ -878,17 +913,27 @@
         function initFlushTracking() {
             const urlParams = new URLSearchParams(window.location.search);
             const urlFlushId = urlParams.get('id');
-            if (urlFlushId) {
+            if (urlFlushId && urlFlushId.trim()) {
                 activeFlushId = urlFlushId.trim().toUpperCase();
             }
 
+            const landingBanner = document.getElementById('landing-banner');
+            const liveTrackingSections = document.getElementById('live-tracking-sections');
             const badge = document.getElementById('flush-id-badge');
-            if (badge && activeFlushId) {
-                badge.innerHTML = `<i class="fa-solid fa-qrcode mr-1"></i> ${activeFlushId}`;
-                badge.classList.remove('hidden');
-            }
 
             if (activeFlushId) {
+                // User IS tracking a flush: Show live tracking, hide landing banner
+                if (landingBanner) landingBanner.classList.add('hidden');
+                if (liveTrackingSections) liveTrackingSections.classList.remove('hidden');
+
+                if (badge) {
+                    badge.innerHTML = `<i class="fa-solid fa-qrcode mr-1"></i> ${activeFlushId}`;
+                    badge.classList.remove('hidden');
+                }
+
+                const inputEl = document.getElementById('tracking-input');
+                if (inputEl) inputEl.value = activeFlushId;
+
                 // Try Firebase Firestore Document Listen
                 if (typeof firebase !== 'undefined' && firebaseConfig && firebaseConfig.projectId !== "YOUR_PROJECT_ID") {
                     try {
@@ -917,7 +962,19 @@
 
                 // Poll every 2 seconds for position updates
                 setInterval(updateRealtimeTrackingUI, 2000);
+            } else {
+                // User is NOT tracking a flush: Show Landing Banner, hide live tracking sections
+                if (landingBanner) landingBanner.classList.remove('hidden');
+                if (liveTrackingSections) liveTrackingSections.classList.add('hidden');
             }
+        }
+
+        function submitTrackingId(event) {
+            if (event) event.preventDefault();
+            const input = document.getElementById('tracking-input');
+            if (!input || !input.value.trim()) return;
+            const cleanId = input.value.trim().toUpperCase();
+            window.location.href = `flushtracker.html?id=${cleanId}`;
         }
 
         function fetchLocalFlushFallback(id) {
