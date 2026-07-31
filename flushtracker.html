@@ -1224,11 +1224,42 @@
             // Required minimum step index for each log item to be started/completed
             const logMinStep = [0, 1, 1, 2, 2, 2, 3];
 
+            // Calculate real-time dynamic timestamps for each milestone
+            const baseMs = (activeFlushData && activeFlushData.timestamp) ? activeFlushData.timestamp : (Date.now() - 15 * 60 * 1000);
+            
+            function formatLogTime(ms) {
+                const d = new Date(ms);
+                return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+            }
+
+            const t0 = baseMs;                      // Flush timestamp (0 min)
+            const t1 = baseMs + 2 * 60 * 1000;       // Street main (2 min)
+            const t2 = baseMs + 8 * 60 * 1000;       // Trunk line (8 min)
+            const t3 = baseMs + 15 * 60 * 1000;      // SEP Arrival (15 min)
+            const t4 = baseMs + 15 * 60 * 1000;      // Primary Clarification & Digestion (15 min)
+            const t5 = baseMs + 24 * 3600 * 1000;    // Sodium Hypochlorite Disinfection (24 hr)
+            const t6 = baseMs + 24.25 * 3600 * 1000; // Deepwater Outfall Discharge (24.25 hr)
+
+            const logTimes = [
+                formatLogTime(t0),
+                stepIndex >= 1 ? formatLogTime(t1) : `Est. ${formatLogTime(t1)}`,
+                stepIndex >= 1 ? formatLogTime(t2) : `Est. ${formatLogTime(t2)}`,
+                stepIndex >= 2 ? `${formatLogTime(t3)} (15 Min Transit)` : `Est. ${formatLogTime(t3)} (15 Min Transit)`,
+                stepIndex >= 2 ? (stepIndex === 3 ? `Completed ${formatLogTime(t4)}` : `IN PROGRESS (Started ${formatLogTime(t4)})`) : `Pending (~15m Mark)`,
+                stepIndex >= 2 ? (stepIndex === 3 ? `Completed ${formatLogTime(t5)}` : `Pending (~24 Hr Mark)`) : `Pending (~24 Hr Mark)`,
+                stepIndex >= 3 ? `Discharged ${formatLogTime(t6)}` : `Pending (Est. ${formatLogTime(t6)})`
+            ];
+
             for (let j = 0; j < 7; j++) {
                 const itemEl = document.getElementById(`log-item-${j}`);
                 const dotEl = document.getElementById(`log-dot-${j}`);
                 const titleEl = document.getElementById(`log-title-${j}`);
                 const descEl = document.getElementById(`log-desc-${j}`);
+                const timeEl = document.getElementById(`log-time-${j}`);
+
+                if (timeEl) {
+                    timeEl.textContent = logTimes[j];
+                }
 
                 if (!itemEl || !dotEl) continue;
 
