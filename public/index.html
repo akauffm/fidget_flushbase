@@ -1034,7 +1034,8 @@
             if (!activeFlushData || !activeFlushData.timestamp) return;
 
             const nowMs = Date.now();
-            const elapsedSec = Math.max(0, (nowMs - activeFlushData.timestamp) / 1000);
+            const flushTimestampMs = Number(activeFlushData.timestamp);
+            const elapsedSec = Math.max(0, (nowMs - flushTimestampMs) / 1000);
 
             let stepIdx = 0;
             let currentPosition = sewerPathCoordinates[0];
@@ -1320,10 +1321,10 @@
 
             // 2. Dynamic Complete Hydro-Journey Log Items (0 to 6)
             // Required minimum step index for each log item to be started/completed
-            const logMinStep = [0, 1, 1, 2, 2, 2, 3];
+            const logMinStep = [0, 1, 1, 2, 2, 3, 3];
 
             // Calculate real-time dynamic timestamps for each milestone
-            const baseMs = (activeFlushData && activeFlushData.timestamp) ? activeFlushData.timestamp : (Date.now() - 15 * 60 * 1000);
+            const baseMs = (activeFlushData && activeFlushData.timestamp) ? Number(activeFlushData.timestamp) : (Date.now() - 15 * 60 * 1000);
 
             function formatLogTime(ms) {
                 const d = new Date(ms);
