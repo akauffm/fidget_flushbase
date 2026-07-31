@@ -179,8 +179,28 @@ def generate_escpos_native_qr(url):
     cmd.extend(b"\x1d\x28\x6b\x03\x00\x31\x51\x30")      # Print
     return bytes(cmd)
 
+def get_next_customer_number():
+    """Reads, increments, and persists the local receipt counter."""
+    counter_file = os.path.join(os.path.dirname(__file__), "receipt_counter.json")
+    count = 0
+    if os.path.exists(counter_file):
+        try:
+            with open(counter_file, 'r') as f:
+                data = json.load(f)
+                count = data.get("customer_number", 0)
+        except Exception:
+            count = 0
+    count += 1
+    try:
+        with open(counter_file, 'w') as f:
+            json.dump({"customer_number": count}, f, indent=2)
+    except Exception as e:
+        print(f" [!] Could not save receipt counter: {e}")
+    return count
+
 def print_receipt(flush_id, formatted_time, tracking_url, qr_filename=None):
     """Formats and prints an ESC/POS styled thermal receipt including QR code graphics"""
+    customer_num = get_next_customer_number()
     header_text = f"""
 ========================================
        FIDGET CAMP FLUSH TRACKER
@@ -200,6 +220,8 @@ def print_receipt(flush_id, formatted_time, tracking_url, qr_filename=None):
 ----------------------------------------
     Remember: Only Flush the 3 P's:
          Poop, Pee, and Paper!
+----------------------------------------
+ You are satisfied customer number {customer_num}
 ========================================
 """
     full_receipt_text = header_text + "\n [ QR CODE GRAPHIC ]\n" + footer_text

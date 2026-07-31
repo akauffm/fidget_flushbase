@@ -4,6 +4,7 @@ node_modules/
 local_flushes.json
 qr_*.png
 last_receipt.txt
+receipt_counter.json
 __pycache__/
 firebase-debug.log
 .firebase/
