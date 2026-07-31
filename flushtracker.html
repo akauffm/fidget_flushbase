@@ -1,0 +1,1262 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlushTracker - 1417 15th St to SF Bay</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        amazon: {
+                            navy: '#131921',
+                            lightNavy: '#232f3e',
+                            blue: '#007185',
+                            accentBlue: '#008296',
+                            yellow: '#FFD814',
+                            yellowHover: '#F7CA00',
+                            orange: '#FFA41C',
+                            grayBg: '#EAEDED',
+                            green: '#067D62'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'Ember', 'Helvetica Neue', 'Arial', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Leaflet JS & CSS for Map Rendering -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* Custom scrollbar & leafet overrides */
+        #map {
+            height: 320px;
+            width: 100%;
+            border-radius: 0.75rem;
+            z-index: 1;
+        }
+
+        .leaflet-container {
+            font-family: inherit;
+        }
+
+        .pulse-marker {
+            box-shadow: 0 0 0 0 rgba(0, 113, 133, 0.7);
+            animation: pulse-ring 1.8s infinite cubic-bezier(0.66, 0, 0, 1);
+        }
+
+        @keyframes pulse-ring {
+            to {
+                box-shadow: 0 0 0 16px rgba(0, 113, 133, 0);
+            }
+        }
+
+        /* Tooltip animation */
+        .amazon-shadow {
+            box-shadow: 0 2px 5px 0 rgba(213, 217, 217, .5);
+        }
+    </style>
+</head>
+
+<body class="bg-amazon-grayBg min-h-screen text-gray-900 font-sans pb-12 antialiased">
+
+    <!-- Top Amazon Navigation Header -->
+    <header class="bg-amazon-navy text-white sticky top-0 z-50 shadow-md">
+        <div class="max-w-3xl mx-auto px-4 py-3 text-xs">
+            <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-location-dot text-amazon-orange text-sm"></i>
+                    <span class="text-gray-200">Deliver to <strong class="text-white font-semibold">SF Bay
+                            Outfall</strong></span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-gray-300 text-[11px] font-mono">Tracking ID: <span
+                            class="text-yellow-300">FLUSH-94103-2026-X</span></span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="max-w-3xl mx-auto px-3 sm:px-4 pt-4 space-y-4">
+
+        <!-- Order Header Card -->
+        <section class="bg-white rounded-xl p-4 sm:p-5 amazon-shadow border border-gray-200">
+            <div
+                class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-100 pb-3 gap-2">
+                <div>
+                    <h1 class="text-xl sm:text-2xl font-bold text-gray-900 flex items-center gap-2">
+                        <span id="status-headline">Discharging into SF Bay today</span>
+                        <span
+                            class="text-xs bg-green-100 text-amazon-green px-2 py-0.5 rounded-full font-semibold border border-green-200 inline-block">ON
+                            TIME</span>
+                    </h1>
+                    <p class="text-xs text-gray-500 mt-0.5">
+                        Origin: <span class="font-medium text-gray-700">1417 15th St, San Francisco, CA 94103</span>
+                    </p>
+                </div>
+                <!-- Thumbnail preview icon -->
+                <div
+                    class="self-end sm:self-center flex items-center gap-2 bg-gray-50 p-2 rounded-lg border border-gray-200">
+                    <div
+                        class="w-10 h-10 bg-amber-100 rounded flex items-center justify-center text-amber-800 text-xl font-bold">
+                        🧻
+                    </div>
+                    <div class="text-right text-[11px]">
+                        <p class="font-bold text-gray-800">1.6 Gal Flush</p>
+                        <p class="text-gray-500">Combined Sewer</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Horizontal Progress Stepper -->
+            <div class="py-5 px-1">
+                <div class="relative flex items-center justify-between">
+                    <!-- Progress Line Background -->
+                    <div class="absolute left-0 top-1/2 -translate-y-1/2 w-full h-1.5 bg-gray-200 rounded-full z-0">
+                    </div>
+                    <!-- Active Progress Line Filler -->
+                    <div id="progress-bar-fill"
+                        class="absolute left-0 top-1/2 -translate-y-1/2 h-1.5 bg-amazon-blue rounded-full z-0 transition-all duration-500"
+                        style="width: 66%;"></div>
+
+                    <!-- Step 1: Flushed -->
+                    <div class="relative z-10 flex flex-col items-center group cursor-pointer" onclick="setStep(0)">
+                        <div id="step-node-0"
+                            class="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-amazon-blue text-white flex items-center justify-center text-xs sm:text-sm font-bold shadow-md transition-all">
+                            <i class="fa-solid fa-check"></i>
+                        </div>
+                        <span class="text-[11px] sm:text-xs font-semibold mt-2 text-gray-800 text-center">Flushed</span>
+                        <span class="text-[9px] text-gray-500 hidden sm:block">15th St Lateral</span>
+                    </div>
+
+                    <!-- Step 2: Sewer Main -->
+                    <div class="relative z-10 flex flex-col items-center group cursor-pointer" onclick="setStep(1)">
+                        <div id="step-node-1"
+                            class="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-amazon-blue text-white flex items-center justify-center text-xs sm:text-sm font-bold shadow-md transition-all">
+                            <i class="fa-solid fa-check"></i>
+                        </div>
+                        <span class="text-[11px] sm:text-xs font-semibold mt-2 text-gray-800 text-center">Street
+                            Main</span>
+                        <span class="text-[9px] text-gray-500 hidden sm:block">Channel Basin</span>
+                    </div>
+
+                    <!-- Step 3: SEP Plant -->
+                    <div class="relative z-10 flex flex-col items-center group cursor-pointer" onclick="setStep(2)">
+                        <div id="step-node-2"
+                            class="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-amazon-blue text-white flex items-center justify-center text-xs sm:text-sm font-bold shadow-md ring-4 ring-cyan-100 transition-all">
+                            <i class="fa-solid fa-water"></i>
+                        </div>
+                        <span
+                            class="text-[11px] sm:text-xs font-bold mt-2 text-amazon-blue text-center">Treatment</span>
+                        <span class="text-[9px] text-amazon-blue font-medium hidden sm:block">Southeast Plant</span>
+                    </div>
+
+                    <!-- Step 4: Discharged Bay -->
+                    <div class="relative z-10 flex flex-col items-center group cursor-pointer" onclick="setStep(3)">
+                        <div id="step-node-3"
+                            class="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-gray-300 text-gray-600 flex items-center justify-center text-xs sm:text-sm font-bold transition-all">
+                            <i class="fa-solid fa-droplet"></i>
+                        </div>
+                        <span class="text-[11px] sm:text-xs font-semibold mt-2 text-gray-500 text-center">SF Bay</span>
+                        <span class="text-[9px] text-gray-400 hidden sm:block">Deepwater Outfall</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live Status Sub-text Card -->
+            <div id="current-status-box"
+                class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900 flex items-start gap-2.5">
+                <i class="fa-solid fa-circle-info text-amazon-blue text-base mt-0.5 shrink-0"></i>
+                <div>
+                    <span class="font-bold block text-sm" id="status-title">Undergoing Multi-Stage Digestion at
+                        Southeast Plant (SEP)</span>
+                    <p id="status-desc" class="mt-0.5 text-gray-700">Wastewater has entered 750 Phelps St (~15 min
+                        transit time). Primary clarifiers are settling heavy organic solids while aerobic bacteria break
+                        down organic matter in 24-hour treatment cycle.</p>
+                    <div class="mt-2 text-[11px] text-blue-800 font-medium flex items-center gap-2">
+                        <span><i class="fa-solid fa-stopwatch mr-1"></i>Est. Outfall Discharge: <strong
+                                id="eta-text">~24 Hours</strong></span>
+                        <span>•</span>
+                        <span>Distance Traveled: <strong id="distance-text">3.2 miles</strong></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Map Card Section -->
+            <div class="mt-4">
+                <div class="flex justify-between items-center mb-2">
+                    <span class="text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center gap-1.5">
+                        <i class="fa-solid fa-map-location-dot text-amazon-blue"></i> Live Wastewater Hydro-Track Map
+                    </span>
+                    <span class="text-[11px] text-gray-500">San Francisco Bayside Watershed</span>
+                </div>
+
+                <div id="map" class="shadow-inner border border-gray-300"></div>
+
+                <div class="flex items-center justify-between mt-2 text-[11px] text-gray-500 px-1">
+                    <span class="flex items-center gap-1"><span
+                            class="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span> Origin (15th St)</span>
+                    <span class="flex items-center gap-1"><span
+                            class="w-2.5 h-2.5 rounded-full bg-blue-600 inline-block"></span> Channel Basin Trunk</span>
+                    <span class="flex items-center gap-1"><span
+                            class="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block"></span> SEP Plant</span>
+                    <span class="flex items-center gap-1"><span
+                            class="w-2.5 h-2.5 rounded-full bg-cyan-500 inline-block"></span> Bay Outfall</span>
+                </div>
+            </div>
+
+            <!-- Quick Action Buttons (Amazon Style) -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-4 pt-3 border-t border-gray-100">
+                <button onclick="scrollToSimulator()"
+                    class="w-full bg-white hover:bg-gray-50 text-gray-800 text-xs font-medium py-2 px-3 border border-gray-300 rounded-lg shadow-sm flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-sliders text-amazon-blue"></i> Open Flow Simulator
+                </button>
+                <button onclick="openInstructionsModal()"
+                    class="w-full bg-white hover:bg-gray-50 text-gray-800 text-xs font-medium py-2 px-3 border border-gray-300 rounded-lg shadow-sm flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-clipboard-list text-amazon-blue"></i> Flush Instructions
+                </button>
+                <button onclick="shareTracking()"
+                    class="w-full bg-white hover:bg-gray-50 text-gray-800 text-xs font-medium py-2 px-3 border border-gray-300 rounded-lg shadow-sm flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-share-nodes text-amazon-blue"></i> Share Tracking
+                </button>
+            </div>
+        </section>
+
+        <!-- Tracking Timeline Card -->
+        <section class="bg-white rounded-xl p-4 amazon-shadow border border-gray-200">
+            <details class="group" open>
+                <summary
+                    class="flex justify-between items-center font-bold text-gray-900 cursor-pointer text-sm sm:text-base list-none">
+                    <span class="flex items-center gap-2">
+                        <i class="fa-solid fa-list-check text-amazon-blue"></i> Complete Hydro-Journey Log
+                    </span>
+                    <span class="text-xs text-amazon-blue group-open:rotate-180 transition-transform">
+                        <i class="fa-solid fa-chevron-down text-sm"></i>
+                    </span>
+                </summary>
+
+                <div
+                    class="mt-4 pt-3 border-t border-gray-100 relative pl-4 sm:pl-6 space-y-6 before:absolute before:left-2.5 sm:before:left-3.5 before:top-4 before:bottom-3 before:w-0.5 before:bg-gray-200">
+
+                    <!-- Log Item 1 -->
+                    <div class="relative flex items-start gap-3">
+                        <div id="log-dot-0"
+                            class="absolute -left-4 sm:-left-6 top-1 w-3.5 h-3.5 rounded-full bg-amazon-blue ring-4 ring-white">
+                        </div>
+                        <div class="flex-1">
+                            <div class="flex justify-between items-baseline">
+                                <h4 class="text-xs font-bold text-gray-900">1. Private Lateral Pipe (1417 15th St)</h4>
+                                <span class="text-[10px] text-gray-400 font-mono">1:42 PM</span>
+                            </div>
+                            <p class="text-xs text-gray-600 mt-0.5">Flush completed via gravity down 4-inch lateral pipe
+                                beneath 1417 15th St property line.</p>
+                            <span
+                                class="inline-block mt-1 text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded font-mono">Gravity
+                                Velocity: ~2.5 ft/sec</span>
+                        </div>
+                    </div>
+
+                    <!-- Log Item 2 -->
+                    <div class="relative flex items-start gap-3">
+                        <div id="log-dot-1"
+                            class="absolute -left-4 sm:-left-6 top-1 w-3.5 h-3.5 rounded-full bg-amazon-blue ring-4 ring-white">
+                        </div>
+                        <div class="flex-1">
+                            <div class="flex justify-between items-baseline">
+                                <h4 class="text-xs font-bold text-gray-900">2. Neighborhood Street Main (15th & Mission)
+                                </h4>
+                                <span class="text-[10px] text-gray-400 font-mono">1:47 PM</span>
+                            </div>
+                            <p class="text-xs text-gray-600 mt-0.5">Merged into 15th Street public sewer network. Mixed
+                                directly with stormwater runoff in SF's Combined Sewer System.</p>
+                            <span
+                                class="inline-block mt-1 text-[10px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded font-mono">Channel
+                                Basin Infrastructure</span>
+                        </div>
+                    </div>
+
+                    <!-- Log Item 3 -->
+                    <div class="relative flex items-start gap-3">
+                        <div id="log-dot-2"
+                            class="absolute -left-4 sm:-left-6 top-1 w-3.5 h-3.5 rounded-full bg-amazon-blue ring-4 ring-white">
+                        </div>
+                        <div class="flex-1">
+                            <div class="flex justify-between items-baseline">
+                                <h4 class="text-xs font-bold text-gray-900">3. Channel Basin Transport Trunk Line</h4>
+                                <span class="text-[10px] text-gray-400 font-mono">1:58 PM</span>
+                            </div>
+                            <p class="text-xs text-gray-600 mt-0.5">Flowed southeast down Mission District gradient
+                                through major transport main towards Bayview.</p>
+                        </div>
+                    </div>
+
+                    <!-- Log Item 4 -->
+                    <div class="relative flex items-start gap-3">
+                        <div id="log-dot-3"
+                            class="absolute -left-4 sm:-left-6 top-1 w-3.5 h-3.5 rounded-full bg-amazon-blue ring-4 ring-white">
+                        </div>
+                        <div class="flex-1">
+                            <div class="flex justify-between items-baseline">
+                                <h4 class="text-xs font-bold text-gray-900">4. Headworks Facility (Southeast Treatment
+                                    Plant)</h4>
+                                <span class="text-[10px] text-gray-400 font-mono">1:57 PM (15 Min Transit)</span>
+                            </div>
+                            <p class="text-xs text-gray-600 mt-0.5">Arrived at SFPUC SEP (750 Phelps St). Bar screening
+                                removed inorganic debris, grit, and plastics.</p>
+                            <span
+                                class="inline-block mt-1 text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded font-mono">Screening
+                                & Grit Removal</span>
+                        </div>
+                    </div>
+
+                    <!-- Log Item 5 -->
+                    <div class="relative flex items-start gap-3">
+                        <div id="log-dot-4"
+                            class="absolute -left-4 sm:-left-6 top-1 w-3.5 h-3.5 rounded-full bg-amazon-blue ring-4 ring-white">
+                        </div>
+                        <div class="flex-1">
+                            <div class="flex justify-between items-baseline">
+                                <h4 class="text-xs font-bold text-amazon-blue">5. Primary Clarification & Biological
+                                    Digestion</h4>
+                                <span class="text-[10px] text-amazon-blue font-bold font-mono">IN PROGRESS (~24 Hr
+                                    Retention)</span>
+                            </div>
+                            <p class="text-xs text-gray-700 mt-0.5 font-medium">Heavy organic solids settling into
+                                sludge while beneficial bacteria digest remaining organic matter over a full 24-hour
+                                treatment cycle.</p>
+                            <div class="mt-1 flex gap-1">
+                                <span
+                                    class="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded font-mono">24h
+                                    Biological Aeration</span>
+                                <span
+                                    class="text-[10px] bg-purple-50 text-purple-700 px-2 py-0.5 rounded font-mono">Solids
+                                    ➔ Multi-Week Biosolids Digest</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Log Item 6 -->
+                    <div class="relative flex items-start gap-3 opacity-60">
+                        <div id="log-dot-5"
+                            class="absolute -left-4 sm:-left-6 top-1 w-3.5 h-3.5 rounded-full bg-gray-300 ring-4 ring-white">
+                        </div>
+                        <div class="flex-1">
+                            <div class="flex justify-between items-baseline">
+                                <h4 class="text-xs font-bold text-gray-700">6. Sodium Hypochlorite Disinfection</h4>
+                                <span class="text-[10px] text-gray-400 font-mono">Pending (~24 Hr Mark)</span>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-0.5">Final chemical disinfection to eliminate pathogens
+                                and bacteria prior to discharge.</p>
+                        </div>
+                    </div>
+
+                    <!-- Log Item 7 -->
+                    <div class="relative flex items-start gap-3 opacity-60">
+                        <div id="log-dot-6"
+                            class="absolute -left-4 sm:-left-6 top-1 w-3.5 h-3.5 rounded-full bg-gray-300 ring-4 ring-white">
+                        </div>
+                        <div class="flex-1">
+                            <div class="flex justify-between items-baseline">
+                                <h4 class="text-xs font-bold text-gray-700">7. Deepwater Outfall Discharge (San
+                                    Francisco Bay)</h4>
+                                <span class="text-[10px] text-gray-400 font-mono">Pending (~24-25 Hours)</span>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-0.5">Discharged offshore at 37.7504, -122.3733 into the
+                                Bayside deepwater channel as high-quality disinfected effluent.</p>
+                        </div>
+                    </div>
+
+                </div>
+            </details>
+        </section>
+
+        <!-- Package / Item Specs Card -->
+        <section class="bg-white rounded-xl p-4 sm:p-5 amazon-shadow border border-gray-200">
+            <h3 class="text-sm font-bold text-gray-900 mb-3 border-b border-gray-100 pb-2">
+                Flush Payload Details
+            </h3>
+
+            <div class="flex flex-col sm:flex-row gap-4 items-start">
+                <!-- Flush graphic image -->
+                <div
+                    class="w-full sm:w-32 h-32 bg-gradient-to-br from-amber-50 to-cyan-50 rounded-lg border border-gray-200 flex flex-col items-center justify-center p-2 text-center shrink-0">
+                    <span class="text-4xl mb-1">🚽</span>
+                    <span class="text-[11px] font-bold text-gray-700">Standard Flush</span>
+                    <span class="text-[9px] text-gray-500">1.6 GPF Low-Flow</span>
+                </div>
+
+                <!-- Product Information table -->
+                <div class="flex-1 space-y-2 text-xs">
+                    <h4 class="text-sm font-bold text-gray-800">Mission District Organic Wastewater Load (1417 15th St)
+                    </h4>
+                    <p class="text-gray-500 text-[11px]">Originated: San Francisco Bayside Watershed (Mission District)
+                    </p>
+
+                    <div class="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-2 border-t border-gray-100 text-[11px]">
+                        <div>
+                            <span class="text-gray-500 block">Facility Operator:</span>
+                            <span class="font-medium text-gray-800">SFPUC Bayside Enterprise</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-500 block">Destination:</span>
+                            <span class="font-medium text-gray-800">San Francisco Bay Outfall</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-500 block">Transit Time to SEP:</span>
+                            <span class="font-medium text-gray-800">~15 Minutes</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-500 block">Liquid Treatment Time:</span>
+                            <span class="font-medium text-gray-800">~24 Hours</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-500 block">Solids Processing:</span>
+                            <span class="font-medium text-emerald-700">Class A Agricultural Biosolids (Weeks)</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-500 block">Estimated Utility Fee:</span>
+                            <span class="font-medium text-gray-800">$0.027 Water Rate</span>
+                        </div>
+                    </div>
+
+                    <!-- SF Combined Sewer Notice Box directly in Payload details -->
+                    <div
+                        class="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-[11px] text-amber-900 mt-3 max-w-md">
+                        <strong class="font-bold block text-amber-950 mb-0.5"><i
+                                class="fa-solid fa-circle-exclamation mr-1 text-amber-600"></i>SF Combined Sewer
+                            Notice:</strong>
+                        Only flush the 3 P's: Pee, Poop, and Paper! Wipes, grease, and plastics cause fatbergs in the
+                        15th St sewer main.
+                    </div>
+
+                    <!-- Plumbing Support Button -->
+                    <div class="pt-2">
+                        <button onclick="openPlumbingModal()"
+                            class="bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-medium py-1.5 px-3 rounded-lg border border-gray-300 flex items-center gap-1.5">
+                            <i class="fa-solid fa-headset text-amazon-blue"></i> Get Plumbing Support
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Separate Flush Simulator Section at Bottom -->
+        <section id="simulator-section"
+            class="bg-white rounded-xl p-4 sm:p-5 amazon-shadow border border-gray-200 space-y-4">
+            <div
+                class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-100 pb-2.5 gap-2">
+                <div>
+                    <h3 class="text-base font-bold text-gray-900 flex items-center gap-2">
+                        <i class="fa-solid fa-gauge-high text-amazon-blue"></i> Flush Simulator
+                    </h3>
+                    <p class="text-[11px] text-gray-500">Interactive hydro-flow simulation independent of live tracking
+                    </p>
+                </div>
+                <!-- "Simulate New Flush" Button placed in header -->
+                <button onclick="resetAndPlaySim()"
+                    class="bg-amazon-yellow hover:bg-amazon-yellowHover text-black text-xs font-bold py-1.5 px-3 rounded-lg border border-yellow-500 shadow-sm flex items-center gap-1.5 active:scale-95 transition-all">
+                    <i class="fa-solid fa-rotate-right text-xs"></i> Simulate New Flush
+                </button>
+            </div>
+
+            <!-- Simulator Controls Row -->
+            <div
+                class="bg-gray-50 rounded-lg p-3 border border-gray-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+                <!-- Play/Pause & Step Buttons -->
+                <div class="flex items-center gap-2 w-full sm:w-auto justify-center">
+                    <button onclick="stepPrev()"
+                        class="w-9 h-9 bg-white hover:bg-gray-100 border border-gray-300 rounded-lg shadow-sm flex items-center justify-center text-gray-700 hover:text-black font-bold transition-all active:scale-95"
+                        title="Previous Step (|<)">
+                        <i class="fa-solid fa-backward-step"></i>
+                    </button>
+                    <button id="sim-play-btn" onclick="toggleSimPlay()"
+                        class="h-9 px-4 bg-amazon-yellow hover:bg-amazon-yellowHover border border-yellow-500 rounded-lg shadow-sm flex items-center justify-center gap-1.5 text-black font-bold text-xs transition-all active:scale-95">
+                        <i id="sim-play-icon" class="fa-solid fa-play"></i>
+                        <span id="sim-play-text">Play Flow</span>
+                    </button>
+                    <button onclick="stepNext()"
+                        class="w-9 h-9 bg-white hover:bg-gray-100 border border-gray-300 rounded-lg shadow-sm flex items-center justify-center text-gray-700 hover:text-black font-bold transition-all active:scale-95"
+                        title="Next Step (>|)">
+                        <i class="fa-solid fa-forward-step"></i>
+                    </button>
+                </div>
+
+                <!-- Waste Type Selector & Status Badge on right -->
+                <div
+                    class="flex items-center gap-3 w-full sm:w-auto flex-1 bg-white p-2 rounded-lg border border-gray-200 justify-between">
+                    <div class="flex items-center gap-2 flex-1 max-w-xs">
+                        <label for="sim-waste-type"
+                            class="font-bold text-gray-700 text-xs shrink-0 flex items-center gap-1.5">
+                            <i class="fa-solid fa-vial text-amazon-blue text-sm"></i> Type:
+                        </label>
+                        <select id="sim-waste-type" onchange="changeWasteType(this.value)"
+                            class="w-full bg-gray-50 border border-gray-300 text-gray-900 font-semibold rounded-md focus:ring-amazon-blue focus:border-amazon-blue p-1.5 text-xs outline-none cursor-pointer">
+                            <option value="liquid">💧 Liquid Waste</option>
+                            <option value="solid">💩 Solid Waste</option>
+                        </select>
+                    </div>
+
+                    <!-- Status badge to the right of waste type dropdown -->
+                    <div class="shrink-0 flex items-center gap-1">
+                        <span id="sim-status-badge"
+                            class="bg-amber-100 text-amber-800 text-[10px] px-2.5 py-1 rounded font-mono font-bold">READY</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dedicated Simulator Map -->
+            <div>
+                <div class="flex justify-between items-center mb-1.5 text-xs">
+                    <span class="font-bold text-gray-700 flex items-center gap-1.5">
+                        <i class="fa-solid fa-map text-amazon-blue"></i> Simulation Map View
+                    </span>
+                    <span id="sim-step-indicator" class="text-[11px] font-mono text-amazon-blue font-bold">Awaiting
+                        Flush</span>
+                </div>
+                <div id="sim-map" class="h-64 sm:h-72 w-full rounded-xl border border-gray-300 shadow-inner"></div>
+            </div>
+
+            <!-- Dynamic Hydro-Journey Log Text Box for current step -->
+            <div id="sim-step-textbox"
+                class="bg-blue-50/80 border border-blue-200 rounded-lg p-3.5 text-xs text-blue-950 space-y-2">
+                <div class="flex items-center justify-between border-b border-blue-200/60 pb-2">
+                    <span id="sim-box-stage" class="font-bold text-sm text-amazon-blue flex items-center gap-2">
+                        <span id="sim-box-icon">💧</span> Ready to Simulate Flush
+                    </span>
+                    <span id="sim-box-dist"
+                        class="text-[11px] bg-white px-2 py-0.5 rounded border border-blue-200 text-gray-600 font-mono font-medium">0.0
+                        miles</span>
+                </div>
+                <p id="sim-box-desc" class="text-gray-700 leading-relaxed">
+                    Select waste type above (Liquid 💧 or Solid 💩) and click "Simulate New Flush" or "Play Flow" to
+                    start tracking the journey from 1417 15th St to Pier 80 Outfall.
+                </p>
+                <div
+                    class="flex flex-wrap items-center justify-between text-[11px] text-blue-800 pt-1 font-mono gap-2 border-t border-blue-200/50">
+                    <span><i class="fa-solid fa-location-arrow mr-1"></i>Location: <strong id="sim-box-loc">1417 15th St
+                            (Origin)</strong></span>
+                    <span><i class="fa-solid fa-bolt mr-1"></i>Flow Velocity: <strong id="sim-box-speed">Awaiting Flush
+                            Action</strong></span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="text-center text-[11px] text-gray-500 py-6 space-y-1">
+            <p>© 2026 flushHub, Inc. Emulating Amazon Order Details UI for SF Water Infrastructure Educational Tracking.
+            </p>
+            <p>Data based on SFPUC Southeast Wastewater Treatment Plant (SEP) & Bayside Watershed Combined Sewer System
+                specs.</p>
+        </footer>
+
+    </main>
+
+    <!-- Modal 1: Fast Forward / Simulation Modal -->
+    <div id="sim-modal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl max-w-sm w-full p-5 space-y-4 shadow-2xl border border-gray-200">
+            <div class="flex justify-between items-center border-b pb-2">
+                <h3 class="font-bold text-gray-900 text-sm flex items-center gap-2">
+                    <i class="fa-solid fa-gauge-high text-amazon-blue"></i> Control Hydraulic Speed
+                </h3>
+                <button onclick="closeModal('sim-modal')" class="text-gray-400 hover:text-gray-600"><i
+                        class="fa-solid fa-xmark"></i></button>
+            </div>
+            <p class="text-xs text-gray-600">Adjust the flow rate simulator to jump between checkpoints along the 1417
+                15th St sewer path.</p>
+
+            <div class="space-y-2">
+                <button onclick="setStep(0); closeModal('sim-modal')"
+                    class="w-full text-left p-2.5 rounded border border-gray-200 hover:bg-blue-50 text-xs font-semibold flex items-center justify-between">
+                    <span>1. Flushed at 1417 15th St</span>
+                    <span class="text-[10px] bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">0.0 mi</span>
+                </button>
+                <button onclick="setStep(1); closeModal('sim-modal')"
+                    class="w-full text-left p-2.5 rounded border border-gray-200 hover:bg-blue-50 text-xs font-semibold flex items-center justify-between">
+                    <span>2. In Channel Basin Street Main</span>
+                    <span class="text-[10px] bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">1.2 mi</span>
+                </button>
+                <button onclick="setStep(2); closeModal('sim-modal')"
+                    class="w-full text-left p-2.5 rounded border border-gray-200 hover:bg-blue-50 text-xs font-semibold flex items-center justify-between">
+                    <span>3. Treatment at SEP (Bayview)</span>
+                    <span class="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">3.2 mi</span>
+                </button>
+                <button onclick="setStep(3); closeModal('sim-modal')"
+                    class="w-full text-left p-2.5 rounded border border-gray-200 hover:bg-blue-50 text-xs font-semibold flex items-center justify-between">
+                    <span>4. Outfall into SF Bay</span>
+                    <span class="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded">3.8 mi</span>
+                </button>
+            </div>
+
+            <button onclick="startAutoAnimation(); closeModal('sim-modal')"
+                class="w-full bg-amazon-yellow hover:bg-amazon-yellowHover text-black text-xs font-bold py-2 rounded-lg border border-yellow-500">
+                <i class="fa-solid fa-play mr-1"></i> Live Auto-Play Journey
+            </button>
+        </div>
+    </div>
+
+    <!-- Modal 2: Flush Instructions -->
+    <div id="instructions-modal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl max-w-sm w-full p-5 space-y-4 shadow-2xl border border-gray-200">
+            <div class="flex justify-between items-center border-b pb-2">
+                <h3 class="font-bold text-gray-900 text-sm flex items-center gap-2">
+                    <i class="fa-solid fa-clipboard-list text-amazon-blue"></i> Flush Instructions
+                </h3>
+                <button onclick="closeModal('instructions-modal')" class="text-gray-400 hover:text-gray-600"><i
+                        class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="text-xs space-y-3 text-gray-700">
+                <div class="p-2.5 bg-yellow-50 border border-yellow-200 rounded">
+                    <strong class="text-yellow-800 block mb-1">SF Combined Sewer Notice:</strong>
+                    Only flush the 3 P's: Pee, Poop, and Paper! Wipes, grease, and plastics cause fatbergs in the 15th
+                    St main.
+                </div>
+                <div class="space-y-1">
+                    <label class="font-bold block text-gray-800">Select Payload Composition:</label>
+                    <select id="payload-type" class="w-full border border-gray-300 rounded p-1.5 text-xs bg-white">
+                        <option>Standard 1.6 Gallon Organic Load</option>
+                        <option>Dual Flush 0.9 Gallon Light Load</option>
+                        <option>Heavy Stormwater Diluted Runoff</option>
+                    </select>
+                </div>
+            </div>
+            <button onclick="closeModal('instructions-modal')"
+                class="w-full bg-amazon-blue hover:bg-amazon-accentBlue text-white text-xs font-bold py-2 rounded-lg">
+                Update Settings
+            </button>
+        </div>
+    </div>
+
+    <!-- Modal 3: Support Modal -->
+    <div id="support-modal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl max-w-sm w-full p-5 space-y-3 shadow-2xl border border-gray-200 text-xs">
+            <div class="flex justify-between items-center border-b pb-2">
+                <h3 class="font-bold text-gray-900 text-sm flex items-center gap-1.5">
+                    <i class="fa-solid fa-headset text-amazon-blue"></i> SF Water & Sewer Support
+                </h3>
+                <button onclick="closeModal('support-modal')" class="text-gray-400 hover:text-gray-600"><i
+                        class="fa-solid fa-xmark"></i></button>
+            </div>
+            <p class="text-gray-600">San Francisco Water, Power and Sewer (SFPUC) manages wastewater treatment at the
+                Southeast Plant.</p>
+            <div class="bg-gray-50 p-2.5 rounded border border-gray-200 space-y-1 font-mono text-[11px]">
+                <p><strong>Emergency Sewer Hotline:</strong> 311 or (415) 701-2311</p>
+                <p><strong>Treatment Plant:</strong> 750 Phelps St, SF</p>
+                <p><strong>Bayside System:</strong> 90% Combined Sewer</p>
+            </div>
+            <button onclick="closeModal('support-modal')"
+                class="w-full bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-2 rounded-lg">
+                Close
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Geographic path coordinates with updated outfall at 37.75037559393314, -122.37329860682091
+        const sewerPathCoordinates = [
+            [37.7667, -122.4170],   // 1. 1417 15th St (Origin)
+            [37.7672, -122.4125],   // 2. 15th St towards Mission
+            [37.7690, -122.4080],   // 3. 15th & Division Channel Basin intake
+            [37.7670, -122.4010],   // 4. Channel Basin Trunk Line
+            [37.7560, -122.3950],   // 5. Bayview conduit route
+            [37.7431, -122.3880],   // 6. Southeast Wastewater Treatment Plant (SEP)
+            [37.75037559393314, -122.37329860682091] // 7. Deepwater Outfall in SF Bay (Updated Coords)
+        ];
+
+        // Step definitions with realistic hydraulic timing (15 min transit, 24 hr liquid treatment)
+        const stepData = [
+            {
+                headline: "Flushed at 1417 15th St",
+                statusTitle: "Flowing through Private Property Lateral Pipe",
+                statusDesc: "Flush initiated at 1417 15th St. Gravity is moving 1.6 gallons down the 4-inch lateral pipe towards the public street main under 15th Street.",
+                eta: "~15 min to SEP, ~24 hr to Bay",
+                distance: "0.1 miles",
+                progressWidth: "10%",
+                coordsIndex: 0,
+                icon: '🚽',
+                velocity: '~2.5 ft/sec (Gravity Flow)',
+                location: '1417 15th St Private Lateral'
+            },
+            {
+                headline: "In Transit through Street Main",
+                statusTitle: "Navigating Channel Basin Sewer Main",
+                statusDesc: "Flowing eastward down the Mission District gradient in the Channel Basin network. Reaches Southeast Plant (SEP) in approximately 15 minutes.",
+                eta: "~10 min to SEP, ~24 hr to Bay",
+                distance: "1.2 miles",
+                progressWidth: "38%",
+                coordsIndex: 2,
+                icon: '🌊',
+                velocity: '~3.8 ft/sec (Trunk Line)',
+                location: '15th & Mission St Main Trunk'
+            },
+            {
+                headline: "Undergoing Treatment at SEP",
+                statusTitle: "Multi-Stage Processing at Southeast Treatment Plant",
+                statusDesc: "Wastewater entered 750 Phelps St (~15 min total transit time). Currently undergoing 24-hour retention in primary settling tanks & secondary biological aerobic digesters.",
+                eta: "~24 Hours (Liquid Disinfection Cycle)",
+                distance: "3.2 miles",
+                progressWidth: "68%",
+                coordsIndex: 5,
+                icon: '🧪',
+                velocity: '24-Hour Biological Digestion',
+                location: 'SEP Plant (750 Phelps St)'
+            },
+            {
+                headline: "Discharged into San Francisco Bay",
+                statusTitle: "Effluent Released Offshore into Deepwater Outfall",
+                statusDesc: "24-hour treatment & disinfection complete! High-quality disinfected effluent released offshore into San Francisco Bay. Removed solids undergo multi-week anaerobic digestion into Class A biosolids.",
+                eta: "Discharged (24 Hr Complete)",
+                distance: "3.8 miles",
+                progressWidth: "100%",
+                coordsIndex: 6,
+                icon: '💧',
+                velocity: 'Deepwater Outfall Release',
+                location: 'SF Bay Outfall (37.7504, -122.3733)'
+            }
+        ];
+
+        // Global variables for main map & simulator map polylines
+        let trackingStep = 2; // Default tracking step at SEP
+        let simStep = 0;      // Simulator starting step
+        let hasSimStarted = false; // Flag to hide Step 1 until simulation is triggered
+        let currentWasteType = 'liquid'; // Waste type: 'liquid' or 'solid'
+
+        let mainMap, mainDashedLine, mainSolidLine, mainFlushMarker, mainStartPin, mainEndPin, mainSepPin;
+        let simMap, simDashedLine, simSolidLine, simFlushMarker, simStartPin, simEndPin, simSepPin;
+
+        let isSimPlaying = false;
+        let simInterval = null;
+
+        // Waste-type specific step definitions for simulator
+        const simStepData = {
+            liquid: [
+                {
+                    headline: "Flushed at 1417 15th St (Liquid)",
+                    statusTitle: "Rapid Lateral Transit (Liquid Waste)",
+                    statusDesc: "1.6 gallons of liquid waste (urine & greywater) instantly flushes down the 4-inch private lateral line from 1417 15th St. Liquid moves fluidly without friction, joining the street main under 15th Street within seconds.",
+                    eta: "~12 min to SEP, ~14 hr to Bay",
+                    distance: "0.1 miles",
+                    coordsIndex: 0,
+                    icon: '💧',
+                    velocity: '~3.0 ft/sec (High Fluid Velocity)',
+                    location: '1417 15th St Private Lateral'
+                },
+                {
+                    headline: "In Transit through Street Main (Liquid)",
+                    statusTitle: "Flowing through Mission District Sewer Main",
+                    statusDesc: "Liquid waste accelerates down the Mission District grade through the Channel Basin combined sewer main. Dissolved nutrients and fluids move continuously towards the Southeast Treatment Plant (SEP) without settling.",
+                    eta: "~8 min to SEP, ~14 hr to Bay",
+                    distance: "1.2 miles",
+                    coordsIndex: 2,
+                    icon: '🌊',
+                    velocity: '~4.2 ft/sec (Trunk Flow)',
+                    location: '15th & Mission St Main Trunk'
+                },
+                {
+                    headline: "Undergoing Treatment at SEP (Liquid)",
+                    statusTitle: "Secondary Biological Aeration & Disinfection",
+                    statusDesc: "At 750 Phelps St, liquid wastewater bypasses heavy sludge settling and enters aerobic aeration basins. Microorganisms break down dissolved organics, followed by sodium hypochlorite disinfection in a ~10-14 hour retention cycle.",
+                    eta: "~12-14 Hours (Disinfection Cycle)",
+                    distance: "3.2 miles",
+                    coordsIndex: 5,
+                    icon: '🧪',
+                    velocity: '12-14 Hr Biological Aeration & Chlorine Contact',
+                    location: 'SEP Plant (750 Phelps St)'
+                },
+                {
+                    headline: "Discharged into San Francisco Bay (Liquid)",
+                    statusTitle: "Clean Treated Effluent Released to SF Bay",
+                    statusDesc: "Disinfected, high-clarity liquid effluent is pumped through the deepwater outfall near Pier 80 (37.7504, -122.3733) into the deep Bayside channel, safely merging into San Francisco Bay currents.",
+                    eta: "Discharged (Treatment Complete)",
+                    distance: "3.8 miles",
+                    coordsIndex: 6,
+                    icon: '💧',
+                    velocity: 'Deepwater Outfall Release',
+                    location: 'SF Bay Outfall Pier 80 (37.7504, -122.3733)'
+                }
+            ],
+            solid: [
+                {
+                    headline: "Flushed at 1417 15th St (Solid Payload)",
+                    statusTitle: "Organic Solid Payload Flush",
+                    statusDesc: "Organic solids and toilet paper are flushed from 1417 15th St. Water momentum pushes the solid mass through the 4-inch lateral pipe toward the main sewer line under 15th Street.",
+                    eta: "~15 min to SEP, weeks for Biosolids",
+                    distance: "0.1 miles",
+                    coordsIndex: 0,
+                    icon: '💩',
+                    velocity: '~2.2 ft/sec (Gravitational Momentum)',
+                    location: '1417 15th St Private Lateral'
+                },
+                {
+                    headline: "In Transit through Street Main (Solid)",
+                    statusTitle: "Main Trunk Conveyance & Bar Screening",
+                    statusDesc: "Solid matter travels along the invert of the Channel Basin trunk line. Upon arrival at SEP headworks, automated bar screens catch coarse non-biodegradable debris while organic solids proceed to primary tanks.",
+                    eta: "~10 min to SEP, multi-week digestion",
+                    distance: "1.2 miles",
+                    coordsIndex: 2,
+                    icon: '🧱',
+                    velocity: '~3.5 ft/sec (Sediment Transport)',
+                    location: 'Channel Basin Main & Headworks'
+                },
+                {
+                    headline: "Undergoing Treatment at SEP (Solid)",
+                    statusTitle: "Primary Clarification & 38-Day Anaerobic Digesters",
+                    statusDesc: "Heavy organic solids settle into primary sludge in large clarifiers at 750 Phelps St. Sludge is pumped into anaerobic digesters heated to 98°F where microbes break down solids over 38 days into biogas and Class A biosolids.",
+                    eta: "~38 Days (Biosolids Processing)",
+                    distance: "3.2 miles",
+                    coordsIndex: 5,
+                    icon: '⚙️',
+                    velocity: '38-Day Anaerobic Thermophilic Digestion',
+                    location: 'SEP Anaerobic Digesters (750 Phelps St)'
+                },
+                {
+                    headline: "Discharged & Biosolids Recycled (Solid)",
+                    statusTitle: "Effluent Released + Class A Biosolids Recycled",
+                    statusDesc: "Liquid portion discharges safely into SF Bay at Pier 80 outfall. The digested organic solids are dewatered into nutrient-rich Class A biosolids and recycled as agricultural fertilizer for California soil!",
+                    eta: "Recycled Biosolids & Bay Release",
+                    distance: "3.8 miles",
+                    coordsIndex: 6,
+                    icon: '🌱',
+                    velocity: 'Outfall Release & Agricultural Recycling',
+                    location: 'SF Bay Outfall (Pier 80) & Agricultural Dist.'
+                }
+            ]
+        };
+
+        window.addEventListener('DOMContentLoaded', () => {
+            initMainMap();
+            initSimMap();
+            setStep(trackingStep);
+            resetSimToUnstarted();
+        });
+
+        // Initialize Main Tracking Map
+        function initMainMap() {
+            mainMap = L.map('map', {
+                zoomControl: true,
+                attributionControl: false
+            }).setView([37.7580, -122.3850], 12);
+
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+                maxZoom: 18,
+                subdomains: 'abcd'
+            }).addTo(mainMap);
+
+            // Full remaining path (Dashed)
+            mainDashedLine = L.polyline(sewerPathCoordinates, {
+                color: '#94a3b8',
+                weight: 4,
+                opacity: 0.7,
+                dashArray: '6, 6',
+                lineJoin: 'round'
+            }).addTo(mainMap);
+
+            // Traversed path (Solid Bold Blue)
+            mainSolidLine = L.polyline([], {
+                color: '#007185',
+                weight: 6,
+                opacity: 0.95,
+                lineJoin: 'round'
+            }).addTo(mainMap);
+
+            // Origin Pin
+            const originIcon = L.divIcon({
+                className: 'custom-pin',
+                html: `<div class="bg-emerald-600 text-white w-7 h-7 rounded-full flex items-center justify-center shadow-lg border-2 border-white text-xs"><i class="fa-solid fa-house font-bold"></i></div>`,
+                iconSize: [28, 28],
+                iconAnchor: [14, 14]
+            });
+            mainStartPin = L.marker(sewerPathCoordinates[0], { icon: originIcon }).addTo(mainMap)
+                .bindPopup("<b>1417 15th St</b><br>Flush Origin Point");
+
+            // SEP Treatment Plant Pin
+            const plantIcon = L.divIcon({
+                className: 'custom-pin',
+                html: `<div class="bg-amber-500 text-white w-7 h-7 rounded-full flex items-center justify-center shadow-lg border-2 border-white text-xs"><i class="fa-solid fa-industry"></i></div>`,
+                iconSize: [28, 28],
+                iconAnchor: [14, 14]
+            });
+            mainSepPin = L.marker(sewerPathCoordinates[5], { icon: plantIcon }).addTo(mainMap)
+                .bindPopup("<b>Southeast Treatment Plant (SEP)</b><br>750 Phelps St, SF");
+
+            // Outfall Pin
+            updateBayOutfallMarker(mainMap, false, (pin) => mainEndPin = pin);
+
+            // Live Moving Marker
+            const payloadIcon = L.divIcon({
+                className: 'pulse-marker rounded-full',
+                html: `<div id="map-payload-emoji" class="bg-amazon-blue text-white w-9 h-9 rounded-full flex items-center justify-center text-lg shadow-xl border-2 border-white">🧪</div>`,
+                iconSize: [36, 36],
+                iconAnchor: [18, 18]
+            });
+
+            mainFlushMarker = L.marker(sewerPathCoordinates[stepData[trackingStep].coordsIndex], { icon: payloadIcon }).addTo(mainMap);
+            mainMap.fitBounds(mainDashedLine.getBounds(), { padding: [30, 30] });
+        }
+
+        // Initialize Separate Simulator Map
+        function initSimMap() {
+            simMap = L.map('sim-map', {
+                zoomControl: true,
+                attributionControl: false
+            }).setView([37.7580, -122.3850], 12);
+
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+                maxZoom: 18,
+                subdomains: 'abcd'
+            }).addTo(simMap);
+
+            // Full remaining path (Dashed)
+            simDashedLine = L.polyline(sewerPathCoordinates, {
+                color: '#94a3b8',
+                weight: 4,
+                opacity: 0.7,
+                dashArray: '6, 6',
+                lineJoin: 'round'
+            }).addTo(simMap);
+
+            // Traversed path (Solid Bold Blue)
+            simSolidLine = L.polyline([], {
+                color: '#008296',
+                weight: 6,
+                opacity: 0.95,
+                lineJoin: 'round'
+            }).addTo(simMap);
+
+            // Origin Pin
+            const originIcon = L.divIcon({
+                className: 'custom-pin',
+                html: `<div class="bg-emerald-600 text-white w-7 h-7 rounded-full flex items-center justify-center shadow-lg border-2 border-white text-xs"><i class="fa-solid fa-house font-bold"></i></div>`,
+                iconSize: [28, 28],
+                iconAnchor: [14, 14]
+            });
+            simStartPin = L.marker(sewerPathCoordinates[0], { icon: originIcon }).addTo(simMap);
+
+            // SEP Pin
+            const plantIcon = L.divIcon({
+                className: 'custom-pin',
+                html: `<div class="bg-amber-500 text-white w-7 h-7 rounded-full flex items-center justify-center shadow-lg border-2 border-white text-xs"><i class="fa-solid fa-industry"></i></div>`,
+                iconSize: [28, 28],
+                iconAnchor: [14, 14]
+            });
+            simSepPin = L.marker(sewerPathCoordinates[5], { icon: plantIcon }).addTo(simMap);
+
+            // Bay Outfall Pin
+            updateBayOutfallMarker(simMap, false, (pin) => simEndPin = pin);
+
+            // Simulator Marker
+            const initialIcon = currentWasteType === 'liquid' ? '💧' : '💩';
+            const simPayloadIcon = L.divIcon({
+                className: 'pulse-marker rounded-full',
+                html: `<div id="sim-map-emoji" class="bg-amazon-blue text-white w-9 h-9 rounded-full flex items-center justify-center text-lg shadow-xl border-2 border-white">${initialIcon}</div>`,
+                iconSize: [36, 36],
+                iconAnchor: [18, 18]
+            });
+
+            simFlushMarker = L.marker(sewerPathCoordinates[0], { icon: simPayloadIcon }).addTo(simMap);
+            simMap.fitBounds(simDashedLine.getBounds(), { padding: [25, 25] });
+
+            updateSimPlantMarker();
+        }
+
+        function updateSimPlantMarker() {
+            if (!simMap || !simSepPin) return;
+
+            // Display white leaf on green background over factory ONLY when solid waste arrives at SEP (Step 3 / Step 4)
+            const wasteArrivedAtFactory = hasSimStarted && simStep >= 2 && currentWasteType === 'solid';
+
+            if (wasteArrivedAtFactory) {
+                const leafPlantIcon = L.divIcon({
+                    className: 'custom-pin',
+                    html: `
+                        <div class="bg-emerald-600 text-white w-7 h-7 rounded-full flex items-center justify-center shadow-lg border-2 border-white text-xs" title="Agricultural Biosolids Output">
+                            <i class="fa-solid fa-leaf font-bold"></i>
+                        </div>
+                    `,
+                    iconSize: [28, 28],
+                    iconAnchor: [14, 14]
+                });
+                simSepPin.setIcon(leafPlantIcon);
+                simSepPin.bindPopup("<b>Southeast Treatment Plant (SEP) - Biosolids Facility</b><br>750 Phelps St, SF<br><span class='text-emerald-700 font-semibold'>🌱 Solid waste arrived! Producing Class A Agricultural Biosolids.</span>");
+            } else {
+                const standardPlantIcon = L.divIcon({
+                    className: 'custom-pin',
+                    html: `<div class="bg-amber-500 text-white w-7 h-7 rounded-full flex items-center justify-center shadow-lg border-2 border-white text-xs"><i class="fa-solid fa-industry"></i></div>`,
+                    iconSize: [28, 28],
+                    iconAnchor: [14, 14]
+                });
+                simSepPin.setIcon(standardPlantIcon);
+                simSepPin.bindPopup("<b>Southeast Treatment Plant (SEP)</b><br>750 Phelps St, SF");
+            }
+        }
+
+        // Helper to update the SF Bay Outfall pin with sleek outfall icon at exact coordinates 37.75037559393314, -122.37329860682091
+        function updateBayOutfallMarker(targetMap, isDelivered, setPinCallback) {
+            let iconHtml;
+            if (isDelivered) {
+                iconHtml = `
+                    <div class="relative bg-cyan-600 text-white w-8 h-8 rounded-full flex items-center justify-center shadow-xl border-2 border-white text-sm">
+                        <i class="fa-solid fa-droplet text-cyan-100"></i>
+                    </div>
+                `;
+            } else {
+                iconHtml = `<div class="bg-cyan-600 text-white w-7 h-7 rounded-full flex items-center justify-center shadow-lg border-2 border-white text-xs"><i class="fa-solid fa-water"></i></div>`;
+            }
+
+            const bayIcon = L.divIcon({
+                className: 'custom-pin',
+                html: iconHtml,
+                iconSize: isDelivered ? [32, 32] : [28, 28],
+                iconAnchor: isDelivered ? [16, 16] : [14, 14]
+            });
+
+            const bayPin = L.marker([37.75037559393314, -122.37329860682091], { icon: bayIcon }).addTo(targetMap)
+                .bindPopup(isDelivered ? "<b>Discharged into SF Bay!</b><br>Effluent Safely Released (37.7504, -122.3733)" : "<b>San Francisco Bay Deepwater Outfall</b><br>Coordinates: 37.7504, -122.3733");
+
+            if (setPinCallback) setPinCallback(bayPin);
+        }
+
+        function setStep(stepIndex) {
+            trackingStep = stepIndex;
+            updateTrackingUI(stepIndex);
+
+            const isDelivered = (stepIndex === 3);
+            updateBayOutfallMarker(mainMap, isDelivered, (pin) => mainEndPin = pin);
+
+            const coordIdx = stepData[stepIndex].coordsIndex;
+            const targetCoords = sewerPathCoordinates[coordIdx];
+
+            // Update solid line up to current step point
+            mainSolidLine.setLatLngs(sewerPathCoordinates.slice(0, coordIdx + 1));
+            mainFlushMarker.setLatLng(targetCoords);
+
+            const emojiEl = document.getElementById('map-payload-emoji');
+            if (emojiEl) {
+                if (isDelivered) {
+                    emojiEl.innerHTML = '<i class="fa-solid fa-droplet text-cyan-200"></i>';
+                    emojiEl.className = "bg-cyan-700 text-white w-9 h-9 rounded-full flex items-center justify-center text-lg shadow-xl border-2 border-white";
+                } else {
+                    emojiEl.innerHTML = stepData[stepIndex].icon;
+                    emojiEl.className = "bg-amazon-blue text-white w-9 h-9 rounded-full flex items-center justify-center text-lg shadow-xl border-2 border-white";
+                }
+            }
+        }
+
+        function updateTrackingUI(stepIndex) {
+            const data = stepData[stepIndex];
+            document.getElementById('status-headline').textContent = data.headline;
+            document.getElementById('status-title').textContent = data.statusTitle;
+            document.getElementById('status-desc').textContent = data.statusDesc;
+            document.getElementById('eta-text').textContent = data.eta;
+            document.getElementById('distance-text').textContent = data.distance;
+
+            document.getElementById('progress-bar-fill').style.width = data.progressWidth;
+
+            for (let i = 0; i < 4; i++) {
+                const node = document.getElementById(`step-node-${i}`);
+                if (i < stepIndex) {
+                    node.className = "w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-amazon-blue text-white flex items-center justify-center text-xs sm:text-sm font-bold shadow-md transition-all";
+                    node.innerHTML = '<i class="fa-solid fa-check"></i>';
+                } else if (i === stepIndex) {
+                    node.className = "w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-amazon-blue text-white flex items-center justify-center text-xs sm:text-sm font-bold shadow-md ring-4 ring-cyan-100 transition-all scale-110";
+                    node.innerHTML = i === 3 ? '<i class="fa-solid fa-droplet"></i>' : '<i class="fa-solid fa-location-dot"></i>';
+                } else {
+                    node.className = "w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-gray-300 text-gray-600 flex items-center justify-center text-xs sm:text-sm font-bold transition-all";
+                    node.innerHTML = i === 3 ? '<i class="fa-solid fa-droplet"></i>' : `<i class="fa-solid fa-circle text-[8px]"></i>`;
+                }
+            }
+        }
+
+        function resetSimToUnstarted() {
+            hasSimStarted = false;
+            simStep = 0;
+            if (simInterval) clearInterval(simInterval);
+            isSimPlaying = false;
+            document.getElementById('sim-play-icon').className = 'fa-solid fa-play';
+            document.getElementById('sim-play-text').textContent = 'Play Flow';
+            document.getElementById('sim-status-badge').textContent = 'READY';
+            document.getElementById('sim-status-badge').className = 'bg-amber-100 text-amber-800 text-[10px] px-2.5 py-1 rounded font-mono font-bold';
+
+            if (simSolidLine) simSolidLine.setLatLngs([]);
+            if (simFlushMarker && sewerPathCoordinates) simFlushMarker.setLatLng(sewerPathCoordinates[0]);
+            updateUnstartedSimUI();
+        }
+
+        function updateUnstartedSimUI() {
+            document.getElementById('sim-step-indicator').textContent = 'Awaiting Flush';
+            const icon = currentWasteType === 'liquid' ? '💧' : '💩';
+            const typeLabel = currentWasteType === 'liquid' ? 'Liquid Waste (Urine & Greywater)' : 'Solid Waste (Organic & Paper)';
+            document.getElementById('sim-box-stage').innerHTML = `<span id="sim-box-icon">${icon}</span> Ready to Simulate Flush`;
+            document.getElementById('sim-box-dist').textContent = '0.0 miles';
+            document.getElementById('sim-box-desc').textContent = `Select waste type above and click "Simulate New Flush" or "Play Flow" to start tracking the ${currentWasteType} waste journey from 1417 15th St to Pier 80 Outfall.`;
+            document.getElementById('sim-box-loc').textContent = '1417 15th St (Origin)';
+            document.getElementById('sim-box-speed').textContent = 'Awaiting Flush Action';
+
+            const simEmojiEl = document.getElementById('sim-map-emoji');
+            if (simEmojiEl) {
+                simEmojiEl.innerHTML = icon;
+                simEmojiEl.className = "bg-amazon-blue text-white w-9 h-9 rounded-full flex items-center justify-center text-lg shadow-xl border-2 border-white";
+            }
+            updateSimPlantMarker();
+        }
+
+        function changeWasteType(val) {
+            currentWasteType = val;
+            updateSimPlantMarker();
+            if (hasSimStarted) {
+                setSimStep(simStep);
+            } else {
+                updateUnstartedSimUI();
+            }
+        }
+
+        // Update Simulator Map & Text Box
+        function setSimStep(stepIndex) {
+            hasSimStarted = true;
+            simStep = stepIndex;
+            updateSimUI(stepIndex);
+
+            const isDelivered = (stepIndex === 3);
+            updateBayOutfallMarker(simMap, isDelivered, (pin) => simEndPin = pin);
+
+            const stepList = simStepData[currentWasteType] || simStepData.liquid;
+            const data = stepList[stepIndex];
+            const coordIdx = data.coordsIndex;
+            const targetCoords = sewerPathCoordinates[coordIdx];
+
+            // Update solid path on simulator map
+            simSolidLine.setLatLngs(sewerPathCoordinates.slice(0, coordIdx + 1));
+            simFlushMarker.setLatLng(targetCoords);
+            simMap.panTo(targetCoords);
+
+            const simEmojiEl = document.getElementById('sim-map-emoji');
+            if (simEmojiEl) {
+                if (isDelivered) {
+                    simEmojiEl.innerHTML = '<i class="fa-solid fa-droplet text-cyan-200"></i>';
+                    simEmojiEl.className = "bg-cyan-700 text-white w-9 h-9 rounded-full flex items-center justify-center text-lg shadow-xl border-2 border-white";
+                } else {
+                    simEmojiEl.innerHTML = data.icon;
+                    simEmojiEl.className = "bg-amazon-blue text-white w-9 h-9 rounded-full flex items-center justify-center text-lg shadow-xl border-2 border-white";
+                }
+            }
+            updateSimPlantMarker();
+        }
+
+        function updateSimUI(stepIndex) {
+            if (!hasSimStarted) {
+                updateUnstartedSimUI();
+                return;
+            }
+            const stepList = simStepData[currentWasteType] || simStepData.liquid;
+            const data = stepList[stepIndex];
+            document.getElementById('sim-step-indicator').textContent = `Step ${stepIndex + 1} of 4`;
+
+            // Update simulator text box
+            document.getElementById('sim-box-stage').innerHTML = `<span id="sim-box-icon">${data.icon}</span> Step ${stepIndex + 1}: ${data.headline}`;
+            document.getElementById('sim-box-dist').textContent = data.distance;
+            document.getElementById('sim-box-desc').textContent = data.statusDesc;
+            document.getElementById('sim-box-loc').textContent = data.location;
+            document.getElementById('sim-box-speed').textContent = data.velocity;
+        }
+
+        // Simulator controls logic
+        function toggleSimPlay() {
+            if (isSimPlaying) {
+                pauseSim();
+            } else {
+                if (!hasSimStarted || simStep >= 3) {
+                    setSimStep(0); // Start or restart simulation from step 0
+                }
+                playSim();
+            }
+        }
+
+        function playSim() {
+            hasSimStarted = true;
+            isSimPlaying = true;
+            document.getElementById('sim-play-icon').className = 'fa-solid fa-pause';
+            document.getElementById('sim-play-text').textContent = 'Pause';
+            document.getElementById('sim-status-badge').textContent = 'SIMULATING';
+            document.getElementById('sim-status-badge').className = 'bg-emerald-100 text-emerald-800 text-[10px] px-2.5 py-1 rounded font-mono font-bold animate-pulse';
+
+            if (simInterval) clearInterval(simInterval);
+            simInterval = setInterval(() => {
+                if (simStep < 3) {
+                    setSimStep(simStep + 1);
+                } else {
+                    pauseSim();
+                }
+            }, 2000);
+        }
+
+        function pauseSim() {
+            isSimPlaying = false;
+            if (simInterval) clearInterval(simInterval);
+            document.getElementById('sim-play-icon').className = 'fa-solid fa-play';
+            document.getElementById('sim-play-text').textContent = 'Play Flow';
+            document.getElementById('sim-status-badge').textContent = !hasSimStarted ? 'READY' : (simStep === 3 ? 'DISCHARGED' : 'PAUSED');
+            document.getElementById('sim-status-badge').className = !hasSimStarted ? 'bg-amber-100 text-amber-800 text-[10px] px-2.5 py-1 rounded font-mono font-bold' : (simStep === 3 ? 'bg-cyan-100 text-cyan-800 text-[10px] px-2.5 py-1 rounded font-mono font-bold' : 'bg-amber-100 text-amber-800 text-[10px] px-2.5 py-1 rounded font-mono font-bold');
+        }
+
+        function stepPrev() {
+            pauseSim();
+            if (!hasSimStarted) {
+                setSimStep(0);
+            } else if (simStep > 0) {
+                setSimStep(simStep - 1);
+            }
+        }
+
+        function stepNext() {
+            pauseSim();
+            if (!hasSimStarted) {
+                setSimStep(0);
+            } else if (simStep < 3) {
+                setSimStep(simStep + 1);
+            }
+        }
+
+        function resetAndPlaySim() {
+            setSimStep(0);
+            scrollToSimulator();
+            playSim();
+        }
+
+        function scrollToSimulator() {
+            const simEl = document.getElementById('simulator-section');
+            simEl.scrollIntoView({ behavior: 'smooth' });
+            setTimeout(() => {
+                if (simMap) simMap.invalidateSize();
+            }, 300);
+        }
+
+        function openPlumbingModal() {
+            document.getElementById('support-modal').classList.remove('hidden');
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).classList.add('hidden');
+        }
+
+        function shareTracking() {
+            const dummyUrl = window.location.href;
+            if (navigator.clipboard) {
+                document.execCommand('copy');
+            }
+            alert("Flush tracking link copied to clipboard!\nShare: " + dummyUrl);
+        }
+    </script>
+</body>
+
+</html>
