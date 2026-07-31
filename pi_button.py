@@ -24,8 +24,8 @@ except ImportError:
     QRCODE_AVAILABLE = False
 
 # Configuration Settings
-FIREBASE_PROJECT_ID = "YOUR_PROJECT_ID"  # Replace with your Firebase Project ID
-PUBLIC_HOST_URL = "https://your-app.web.app" # Replace with your deployed app URL (or http://<pi-ip>:8000)
+FIREBASE_PROJECT_ID = "flushbase"  # Replace with your Firebase Project ID
+PUBLIC_HOST_URL = "https://flushbase.web.app" # Replace with your deployed app URL (or http://<pi-ip>:8000)
 BUTTON_GPIO_PIN = 17 # GPIO pin connected to button (active low with internal pull-up)
 
 # Check GPIO Availability (Raspberry Pi vs Mac/PC Workstation)
@@ -122,11 +122,68 @@ def generate_qr_code(tracking_url, flush_id):
 
     return qr_filename
 
-def print_receipt(flush_id, formatted_time, tracking_url):
-    """Formats and prints an ESC/POS styled thermal receipt"""
-    receipt_text = f"""
+def pil_image_to_escpos_raster(img_filename, target_width=384):
+    """Converts a PNG image file into ESC/POS GS v 0 raster bit-image commands for thermal printers."""
+    if not Image:
+        return b""
+    try:
+        with Image.open(img_filename) as im:
+            w, h = im.size
+            aspect = h / float(w)
+            new_w = min(w, target_width)
+            new_w = (new_w // 8) * 8  # Width must be a multiple of 8
+            new_h = int(new_w * aspect)
+
+            bw = im.convert('L').resize((new_w, new_h))
+            bw = bw.point(lambda p: 255 if p > 128 else 0, mode='1')
+
+            width_bytes = new_w // 8
+            raster_data = bytearray()
+            pixels = bw.load()
+
+            for y in range(new_h):
+                for x_byte in range(width_bytes):
+                    byte_val = 0
+                    for bit in range(8):
+                        x = x_byte * 8 + bit
+                        if pixels[x, y] == 0:  # Black pixel
+                            byte_val |= (1 << (7 - bit))
+                    raster_data.append(byte_val)
+
+            xL = width_bytes & 0xFF
+            xH = (width_bytes >> 8) & 0xFF
+            yL = new_h & 0xFF
+            yH = (new_h >> 8) & 0xFF
+
+            # ESC/POS GS v 0 0 command header
+            cmd = bytearray([0x1D, 0x76, 0x30, 0x00, xL, xH, yL, yH])
+            cmd.extend(raster_data)
+            return bytes(cmd)
+    except Exception as e:
+        print(f" [!] Raster image conversion error: {e}")
+        return b""
+
+def generate_escpos_native_qr(url):
+    """Generates standard native ESC/POS QR code command sequence (GS ( k)."""
+    url_bytes = url.encode('utf-8')
+    num_bytes = len(url_bytes) + 3
+    pL = num_bytes & 0xFF
+    pH = (num_bytes >> 8) & 0xFF
+
+    cmd = bytearray()
+    cmd.extend(b"\x1d\x28\x6b\x04\x00\x31\x41\x32\x00")  # Model 2
+    cmd.extend(b"\x1d\x28\x6b\x03\x00\x31\x43\x06")      # Size 6
+    cmd.extend(b"\x1d\x28\x6b\x03\x00\x31\x45\x31")      # Error level M
+    cmd.extend(bytes([0x1D, 0x28, 0x6B, pL, pH, 0x31, 0x50, 0x30]))
+    cmd.extend(url_bytes)
+    cmd.extend(b"\x1d\x28\x6b\x03\x00\x31\x51\x30")      # Print
+    return bytes(cmd)
+
+def print_receipt(flush_id, formatted_time, tracking_url, qr_filename=None):
+    """Formats and prints an ESC/POS styled thermal receipt including QR code graphics"""
+    header_text = f"""
 ========================================
-       SAN FRANCISCO FLUSH TRACKER
+       FIDGET CAMP FLUSH TRACKER
      1417 15th St ➔ Pier 80 Outfall
 ========================================
  TICKET ID:    {flush_id}
@@ -136,28 +193,55 @@ def print_receipt(flush_id, formatted_time, tracking_url):
  DESTINATION:  SF Bay Outfall (800 ft)
 ----------------------------------------
  SCAN QR CODE TO TRACK YOUR FLUSH LIVE:
+"""
 
+    footer_text = f"""
  {tracking_url}
 ----------------------------------------
-   SFPUC Bayside Sewer Infrastructure
-    Remember: Only Flush the 3 P's!
+    Remember: Only Flush the 3 P's:
+         Poop, Pee, and Paper!
 ========================================
 """
-    print(receipt_text)
+    full_receipt_text = header_text + "\n [ QR CODE GRAPHIC ]\n" + footer_text
+    print(full_receipt_text)
     
     # Save receipt copy
     receipt_file = os.path.join(os.path.dirname(__file__), "last_receipt.txt")
     with open(receipt_file, 'w') as f:
-        f.write(receipt_text)
+        f.write(full_receipt_text)
 
-    # Optional: Send raw ESC/POS bytes to connected USB receipt printer (/dev/usb/lp0)
+    # Send raw ESC/POS bytes to connected USB thermal receipt printer (/dev/usb/lp0)
     if os.path.exists("/dev/usb/lp0"):
         try:
             with open("/dev/usb/lp0", "wb") as printer:
-                printer.write(b"\x1b\x40") # ESC @ (Initialize printer)
-                printer.write(receipt_text.encode('utf-8'))
-                printer.write(b"\x1d\x56\x41\x03") # GS V (Cut paper)
-            print(" Printed receipt to USB Thermal Printer (/dev/usb/lp0)!")
+                # 1. Initialize printer
+                printer.write(b"\x1b\x40")  # ESC @
+                
+                # 2. Print Header Text
+                printer.write(header_text.encode('utf-8'))
+                
+                # 3. Center Align for QR Code
+                printer.write(b"\x1b\x61\x01")  # ESC a 1 (Center)
+                
+                # 4. Print QR Code Graphic (Raster bit-image or Native QR)
+                printed_qr = False
+                if qr_filename and os.path.exists(qr_filename):
+                    raster_bytes = pil_image_to_escpos_raster(qr_filename)
+                    if raster_bytes:
+                        printer.write(raster_bytes)
+                        printed_qr = True
+                
+                if not printed_qr:
+                    printer.write(generate_escpos_native_qr(tracking_url))
+                
+                # 5. Left Align & Print Footer Text
+                printer.write(b"\x1b\x61\x00")  # ESC a 0 (Left)
+                printer.write(footer_text.encode('utf-8'))
+                
+                # 6. Feed & Cut Paper
+                printer.write(b"\x1d\x56\x41\x03")  # GS V (Cut)
+                
+            print(" Printed thermal receipt with QR Code graphic to /dev/usb/lp0!")
         except Exception as err:
             print(f" Could not write to /dev/usb/lp0: {err}")
 
@@ -180,10 +264,10 @@ def trigger_flush_event():
     save_to_firestore(flush_id, timestamp_ms, formatted_time)
 
     # 2. Generate QR code
-    generate_qr_code(tracking_url, flush_id)
+    qr_filename = generate_qr_code(tracking_url, flush_id)
 
     # 3. Print thermal receipt
-    print_receipt(flush_id, formatted_time, tracking_url)
+    print_receipt(flush_id, formatted_time, tracking_url, qr_filename)
 
 def main():
     print("==================================================")
