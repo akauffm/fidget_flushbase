@@ -322,7 +322,31 @@ def trigger_flush_event():
         except Exception:
             pass
 
+def test_gpio(pin_num=BUTTON_GPIO_PIN):
+    """Continuously prints raw GPIO state to debug button wiring."""
+    print(f"\n🔍 Testing GPIO Pin {pin_num} (Physical Pin 11)...")
+    print(" Press your physical button to see live state changes. (Press Ctrl+C to exit)\n")
+    try:
+        from gpiozero import Button
+        btn = Button(pin_num, pull_up=True, bounce_time=0.1)
+        prev_state = None
+        while True:
+            is_pressed = btn.is_pressed
+            if is_pressed != prev_state:
+                if is_pressed:
+                    print(" 🟢 [BUTTON PRESSED!] (Signal connected to GND)")
+                else:
+                    print(" ⚪ [BUTTON RELEASED] (Signal resting HIGH)")
+                prev_state = is_pressed
+            time.sleep(0.05)
+    except Exception as e:
+        print(f" [!] Error testing GPIO: {e}")
+
 def main():
+    if "--test-gpio" in sys.argv or "--test" in sys.argv:
+        test_gpio()
+        sys.exit(0)
+
     print("==================================================")
     print("  San Francisco FlushTracker Raspberry Pi System")
     print("==================================================")
@@ -330,9 +354,10 @@ def main():
     if IS_RASPBERRY_PI:
         print(f" Running on Raspberry Pi! Listening on GPIO Pin {BUTTON_GPIO_PIN}...")
         try:
-            button = Button(BUTTON_GPIO_PIN, bounce_time=0.2)
+            button = Button(BUTTON_GPIO_PIN, pull_up=True, bounce_time=0.2)
             button.when_pressed = trigger_flush_event
-            print(" Press physical button to generate a flush. (Press Ctrl+C to exit)\n")
+            print(" Press physical button to generate a flush. (Press Ctrl+C to exit)")
+            print(" TIP: Run 'python3 pi_button.py --test-gpio' to test wiring state.\n")
             while True:
                 time.sleep(0.1)
         except KeyboardInterrupt:
