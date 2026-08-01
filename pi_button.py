@@ -122,8 +122,8 @@ def generate_qr_code(tracking_url, flush_id):
 
     return qr_filename
 
-def pil_image_to_escpos_raster(img_filename, target_width=384):
-    """Converts a PNG image file into ESC/POS GS v 0 raster bit-image commands for thermal printers."""
+def pil_image_to_escpos_raster(img_filename, target_width=256):
+    """Converts a PNG image file into ESC/POS GS v 0 raster bit-image commands for 58mm thermal printers (256px width)."""
     if not Image:
         return b""
     try:
@@ -172,7 +172,7 @@ def generate_escpos_native_qr(url):
 
     cmd = bytearray()
     cmd.extend(b"\x1d\x28\x6b\x04\x00\x31\x41\x32\x00")  # Model 2
-    cmd.extend(b"\x1d\x28\x6b\x03\x00\x31\x43\x06")      # Size 6
+    cmd.extend(b"\x1d\x28\x6b\x03\x00\x31\x43\x05")      # Size 5 for 58mm paper
     cmd.extend(b"\x1d\x28\x6b\x03\x00\x31\x45\x31")      # Error level M
     cmd.extend(bytes([0x1D, 0x28, 0x6B, pL, pH, 0x31, 0x50, 0x30]))
     cmd.extend(url_bytes)
@@ -199,30 +199,33 @@ def get_next_customer_number():
     return count
 
 def print_receipt(flush_id, formatted_time, tracking_url, qr_filename=None):
-    """Formats and prints an ESC/POS styled thermal receipt including QR code graphics"""
+    """Formats and prints an ESC/POS styled thermal receipt formatted for 58mm paper (32 columns max)"""
     customer_num = get_next_customer_number()
+    divider = "=" * 32
+    dash_line = "-" * 32
+
     header_text = f"""
-========================================
-       FIDGET CAMP FLUSH TRACKER
-     1417 15th St ➔ Pier 80 Outfall
-========================================
- TICKET ID:    {flush_id}
- TIMESTAMP:    {formatted_time}
- FLUSH TYPE:   Liquid Stream (1.6 GPF)
- ORIGIN:       1417 15th St (Mission Dist)
- DESTINATION:  SF Bay Outfall (800 ft)
-----------------------------------------
- SCAN QR CODE TO TRACK YOUR FLUSH LIVE:
+{divider}
+   FIDGET CAMP FLUSH TRACKER
+ 1417 15th St ➔ Pier 80 Outfall
+{divider}
+ TICKET ID:   {flush_id}
+ TIMESTAMP:   {formatted_time}
+ FLUSH TYPE:  Liquid Stream (1.6 GPF)
+ ORIGIN:      1417 15th St, SF
+ DESTINATION: SF Bay Outfall
+{dash_line}
+ SCAN QR CODE TO TRACK LIVE:
 """
 
     footer_text = f"""
  {tracking_url}
-----------------------------------------
-    Remember: Only Flush the 3 P's:
-         Poop, Pee, and Paper!
-----------------------------------------
- You are satisfied customer number {customer_num}
-========================================
+{dash_line}
+  Remember: Only Flush the 3 P's:
+     Poop, Pee, and Paper!
+{dash_line}
+ You are satisfied customer #{customer_num}
+{divider}
 """
     full_receipt_text = header_text + "\n [ QR CODE GRAPHIC ]\n" + footer_text
     print(full_receipt_text)
@@ -241,7 +244,7 @@ def print_receipt(flush_id, formatted_time, tracking_url, qr_filename=None):
 
         printed_qr = False
         if qr_filename and os.path.exists(qr_filename):
-            raster_bytes = pil_image_to_escpos_raster(qr_filename)
+            raster_bytes = pil_image_to_escpos_raster(qr_filename, target_width=256)
             if raster_bytes:
                 raw_bytes.extend(raster_bytes)
                 printed_qr = True
@@ -283,7 +286,7 @@ def trigger_flush_event():
     flush_id = generate_flush_id()
     now = datetime.datetime.now()
     timestamp_ms = int(now.timestamp() * 1000)
-    formatted_time = now.strftime("%B %d, %Y %I:%M:%S %p %Z").strip()
+    formatted_time = now.strftime("%b %d, %Y %I:%M %p").strip()
 
     # Public tracking URL
     base_url = PUBLIC_HOST_URL.rstrip('/')
