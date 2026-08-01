@@ -125,10 +125,16 @@ def generate_qr_code(tracking_url, flush_id):
 
     return qr_filename
 
-def pil_image_to_escpos_raster(img_filename, target_width=256):
-    """Converts a PNG image file into ESC/POS GS v 0 raster bit-image commands for 58mm thermal printers (256px width)."""
-    if Image is None:
+def pil_image_to_escpos_raster(img_filename, target_width=200):
+    """Converts a PNG image file into ESC/POS GS v 0 raster bit-image commands for 58mm thermal printers (200px width)."""
+    try:
+        from PIL import Image
+    except ImportError:
         return b""
+
+    if not img_filename or not os.path.exists(img_filename):
+        return b""
+
     try:
         with Image.open(img_filename) as im:
             w, h = im.size
@@ -175,7 +181,7 @@ def generate_escpos_native_qr(url):
 
     cmd = bytearray()
     cmd.extend(b"\x1d\x28\x6b\x04\x00\x31\x41\x32\x00")  # Model 2
-    cmd.extend(b"\x1d\x28\x6b\x03\x00\x31\x43\x05")      # Size 5 for 58mm paper
+    cmd.extend(b"\x1d\x28\x6b\x03\x00\x31\x43\x04")      # Size 4 for 58mm paper
     cmd.extend(b"\x1d\x28\x6b\x03\x00\x31\x45\x31")      # Error level M
     cmd.extend(bytes([0x1D, 0x28, 0x6B, pL, pH, 0x31, 0x50, 0x30]))
     cmd.extend(url_bytes)
@@ -202,32 +208,34 @@ def get_next_customer_number():
     return count
 
 def print_receipt(flush_id, formatted_time, tracking_url, qr_filename=None):
-    """Formats and prints an ESC/POS styled thermal receipt formatted for 58mm paper (32 columns max)"""
+    """Formats and prints an ESC/POS styled thermal receipt for 58mm paper (28 columns max)"""
     customer_num = get_next_customer_number()
-    divider = "=" * 32
-    dash_line = "-" * 32
+    divider = "=" * 28
+    dash_line = "-" * 28
 
     header_text = f"""
 {divider}
-   FIDGET CAMP FLUSH TRACKER
- 1417 15th St ➔ Pier 80 Outfall
+ FIDGET CAMP FLUSH TRACKER
+1417 15th St -> Pier 80
 {divider}
- TICKET ID:   {flush_id}
- TIMESTAMP:   {formatted_time}
- FLUSH TYPE:  Liquid Stream (1.6 GPF)
- ORIGIN:      1417 15th St, SF
- DESTINATION: SF Bay Outfall
+ID:       {flush_id}
+DATE:     {formatted_time}
+TYPE:     Liquid (1.6 GPF)
+ORIGIN:   1417 15th St, SF
+DEST:     Pier 80 Outfall
 {dash_line}
- SCAN QR CODE TO TRACK LIVE:
+SCAN QR CODE TO TRACK LIVE:
 """
 
     footer_text = f"""
- {tracking_url}
+  https://flushbase.web.app
+  /flushtracker.html?id=
+       {flush_id}
 {dash_line}
-  Remember: Only Flush the 3 P's:
+  Remember: Only Flush 3 P's:
      Poop, Pee, and Paper!
 {dash_line}
- You are satisfied customer #{customer_num}
+You are satisfied customer #{customer_num}
 {divider}
 """
     full_receipt_text = header_text + "\n [ QR CODE GRAPHIC ]\n" + footer_text
