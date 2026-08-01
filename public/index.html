@@ -1131,7 +1131,7 @@
                 .bindPopup("<b>Southeast Treatment Plant (SEP)</b><br>750 Phelps St, SF");
 
             // Outfall Pin
-            updateBayOutfallMarker(mainMap, false, (pin) => mainEndPin = pin);
+            updateBayOutfallMarker(mainMap, false, mainEndPin, (pin) => mainEndPin = pin);
 
             // Live Moving Marker
             const payloadIcon = L.divIcon({
@@ -1193,7 +1193,7 @@
             simSepPin = L.marker(sewerPathCoordinates[7], { icon: plantIcon }).addTo(simMap);
 
             // Bay Outfall Pin
-            updateBayOutfallMarker(simMap, false, (pin) => simEndPin = pin);
+            updateBayOutfallMarker(simMap, false, simEndPin, (pin) => simEndPin = pin);
 
             // Simulator Marker
             const initialIcon = currentWasteType === 'liquid' ? '💧' : '💩';
@@ -1242,7 +1242,11 @@
         }
 
         // Helper to update the SF Bay Outfall pin with sleek outfall icon at exact coordinates 37.75037559393314, -122.37329860682091
-        function updateBayOutfallMarker(targetMap, isDelivered, setPinCallback) {
+        function updateBayOutfallMarker(targetMap, isDelivered, currentPin, setPinCallback) {
+            if (currentPin && targetMap) {
+                targetMap.removeLayer(currentPin);
+            }
+
             let iconHtml;
             if (isDelivered) {
                 iconHtml = `
@@ -1272,7 +1276,7 @@
             updateTrackingUI(stepIndex);
 
             const isDelivered = (stepIndex === 3);
-            updateBayOutfallMarker(mainMap, isDelivered, (pin) => mainEndPin = pin);
+            updateBayOutfallMarker(mainMap, isDelivered, mainEndPin, (pin) => mainEndPin = pin);
 
             const coordIdx = stepData[stepIndex].coordsIndex;
             const targetCoords = sewerPathCoordinates[coordIdx];
@@ -1451,7 +1455,7 @@
             updateSimUI(stepIndex);
 
             const isDelivered = (stepIndex === 3);
-            updateBayOutfallMarker(simMap, isDelivered, (pin) => simEndPin = pin);
+            updateBayOutfallMarker(simMap, isDelivered, simEndPin, (pin) => simEndPin = pin);
 
             const stepList = simStepData[currentWasteType] || simStepData.liquid;
             const data = stepList[stepIndex];

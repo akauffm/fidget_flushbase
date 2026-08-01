@@ -11,9 +11,9 @@ import os
 import sys
 import time
 import random
-import string
 import datetime
 import json
+import subprocess
 import requests
 
 # Try importing qrcode and PIL Image for QR generation
@@ -329,85 +329,31 @@ def trigger_flush_event():
         except Exception:
             pass
 
-def test_gpio(pin_num=BUTTON_GPIO_PIN):
-    """Continuously prints raw GPIO state to debug button wiring."""
-    print(f"\n🔍 Testing GPIO Pin {pin_num} (Physical Pin 11)...")
-    print(" Press your physical button to see live state changes. (Press Ctrl+C to exit)\n")
+def create_button(pin_num, bounce_time):
+    """Creates a gpiozero Button, or exits with install instructions if no GPIO backend is available."""
     try:
         from gpiozero import Button
-        btn = Button(pin_num, pull_up=True, bounce_time=0.1)
-        prev_state = None
-        while True:
-            is_pressed = btn.is_pressed
-            if is_pressed != prev_state:
-                if is_pressed:
-                    print(" 🟢 [BUTTON PRESSED!] (Signal connected to GND)")
-                else:
-                    print(" ⚪ [BUTTON RELEASED] (Signal resting HIGH)")
-                prev_state = is_pressed
-            time.sleep(0.05)
+        return Button(pin_num, pull_up=True, bounce_time=bounce_time)
     except Exception as e:
-        print(f" [!] Error testing GPIO: {e}")
-
-class NativeSysfsButton:
-    """Zero-dependency Linux kernel sysfs GPIO button listener for Raspberry Pi."""
-    def __init__(self, pin=17):
-        self.pin = pin
-        self.export_path = f"/sys/class/gpio/gpio{pin}"
-        self.setup_pin()
-
-    def setup_pin(self):
-        if not os.path.exists(self.export_path):
-            try:
-                with open("/sys/class/gpio/export", "w") as f:
-                    f.write(str(self.pin))
-                time.sleep(0.1)
-            except Exception:
-                pass
-        if os.path.exists(f"{self.export_path}/direction"):
-            try:
-                with open(f"{self.export_path}/direction", "w") as f:
-                    f.write("in")
-            except Exception:
-                pass
-        if os.path.exists(f"{self.export_path}/active_low"):
-            try:
-                with open(f"{self.export_path}/active_low", "w") as f:
-                    f.write("1")
-            except Exception:
-                pass
-
-    def is_pressed(self):
-        val_path = f"{self.export_path}/value"
-        if os.path.exists(val_path):
-            try:
-                with open(val_path, "r") as f:
-                    return f.read().strip() == "1"
-            except Exception:
-                pass
-        return False
+        print(f" [!] Could not set up GPIO pin {pin_num} via gpiozero: {e}")
+        print()
+        print(" gpiozero needs a pin-driver backend (lgpio) to talk to the hardware.")
+        print(" Fix it with ONE of the following, then re-run:")
+        print("   System Python:   sudo apt install python3-gpiozero python3-lgpio")
+        print("   This venv:       pip install gpiozero lgpio")
+        print("   Or recreate venv with access to apt packages:")
+        print("                    python3 -m venv --system-site-packages venv")
+        sys.exit(1)
 
 def test_gpio(pin_num=BUTTON_GPIO_PIN):
     """Continuously prints raw GPIO state to debug button wiring."""
     print(f"\n🔍 Testing GPIO Pin {pin_num} (Physical Pin 11)...")
     print(" Press your physical button to see live state changes. (Press Ctrl+C to exit)\n")
-
-    # Try gpiozero first, fallback to native sysfs
-    btn_obj = None
-    try:
-        from gpiozero import Button
-        btn_obj = Button(pin_num, pull_up=True, bounce_time=0.1)
-        print(" [✓] Using gpiozero backend.")
-    except Exception:
-        print(" [✓] Using zero-dependency Native Sysfs backend.")
-        btn_obj = NativeSysfsButton(pin_num)
-
+    btn = create_button(pin_num, bounce_time=0.05)
     prev_state = None
     try:
         while True:
-            is_pressed = btn_obj.is_pressed if hasattr(btn_obj, 'is_pressed') else getattr(btn_obj, 'is_active', False)
-            if callable(is_pressed):
-                is_pressed = is_pressed()
+            is_pressed = btn.is_pressed
             if is_pressed != prev_state:
                 if is_pressed:
                     print(" 🟢 [BUTTON PRESSED!] (Signal connected to GND)")
@@ -429,62 +375,15 @@ def main():
 
     if IS_RASPBERRY_PI:
         print(f" [✓] Raspberry Pi Hardware Detected! Setting up GPIO Pin {BUTTON_GPIO_PIN}...")
-        listener_started = False
-
-        # Backend 1: gpiozero
+        button = create_button(BUTTON_GPIO_PIN, bounce_time=0.2)
+        button.when_pressed = trigger_flush_event
+        print(f" [✓] Connected via gpiozero! Listening for button presses on GPIO {BUTTON_GPIO_PIN}...")
+        print(" Press physical button to generate a flush. (Press Ctrl+C to exit)\n")
         try:
-            from gpiozero import Button
-            button = Button(BUTTON_GPIO_PIN, pull_up=True, bounce_time=0.2)
-            button.when_pressed = trigger_flush_event
-            print(f" [✓] Connected via gpiozero! Listening for button presses on GPIO {BUTTON_GPIO_PIN}...")
-            listener_started = True
-            print(" Press physical button to generate a flush. (Press Ctrl+C to exit)\n")
             while True:
-                time.sleep(0.1)
+                time.sleep(1)
         except KeyboardInterrupt:
             print("\n Exiting FlushTracker Pi listener.")
-            sys.exit(0)
-        except Exception:
-            pass
-
-        # Backend 2: RPi.GPIO
-        if not listener_started:
-            try:
-                import RPi.GPIO as GPIO
-                GPIO.setmode(GPIO.BCM)
-                GPIO.setup(BUTTON_GPIO_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-
-                def on_gpi_event(channel):
-                    trigger_flush_event()
-
-                GPIO.add_event_detect(BUTTON_GPIO_PIN, GPIO.FALLING, callback=on_gpi_event, bouncetime=300)
-                print(f" [✓] Connected via RPi.GPIO! Listening for button presses on GPIO {BUTTON_GPIO_PIN}...")
-                listener_started = True
-                print(" Press physical button to generate a flush. (Press Ctrl+C to exit)\n")
-                while True:
-                    time.sleep(0.1)
-            except KeyboardInterrupt:
-                print("\n Exiting FlushTracker Pi listener.")
-                sys.exit(0)
-            except Exception:
-                pass
-
-        # Backend 3: Zero-Dependency Native Linux Sysfs (Fallback)
-        if not listener_started:
-            print(f" [✓] Connected via Native Linux Sysfs! Listening for button presses on GPIO {BUTTON_GPIO_PIN}...")
-            sys_btn = NativeSysfsButton(BUTTON_GPIO_PIN)
-            print(" Press physical button to generate a flush. (Press Ctrl+C to exit)\n")
-            prev = False
-            try:
-                while True:
-                    cur = sys_btn.is_pressed()
-                    if cur and not prev:
-                        trigger_flush_event()
-                    prev = cur
-                    time.sleep(0.1)
-            except KeyboardInterrupt:
-                print("\n Exiting FlushTracker Pi listener.")
-                sys.exit(0)
     else:
         print(" Running in Workstation / Development Mode.")
         print(" Press [ENTER] in terminal to trigger a new button flush! (Ctrl+C to quit)\n")

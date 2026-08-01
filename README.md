@@ -78,28 +78,46 @@ Create a service configuration file:
 sudo nano /etc/systemd/system/flushtracker.service
 ```
 
-Paste the following:
+Paste the following, adjusting the two paths and `User=` to match where the
+repo lives on your Pi. `ExecStart` must point at the **venv's** python so the
+dependencies installed there (lgpio, qrcode, requests) are found:
 ```ini
 [Unit]
 Description=FlushTracker Button Listener
-After=network.target
+Wants=network-online.target
+After=network-online.target
 
 [Service]
-ExecStart=/usr/bin/python3 /home/pi/fidget_flushbase/pi_button.py
+ExecStart=/home/pi/fidget_flushbase/venv/bin/python /home/pi/fidget_flushbase/pi_button.py --pi
 WorkingDirectory=/home/pi/fidget_flushbase
-StandardOutput=inherit
-StandardError=inherit
-Restart=always
 User=pi
+Restart=always
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-Enable and start the background service:
+`Restart=always` relaunches the script if it ever crashes; `RestartSec=3`
+waits 3 seconds between attempts so a persistent failure can't crash-loop
+at full speed.
+
+Enable it to start on every boot, and start it now:
 ```bash
-sudo systemctl enable flushtracker
-sudo systemctl start flushtracker
+sudo systemctl daemon-reload
+sudo systemctl enable --now flushtracker
+```
+
+Check that it's running and watch its live output:
+```bash
+systemctl status flushtracker
+journalctl -u flushtracker -f
+```
+
+After editing the service file or `pi_button.py`, apply changes with:
+```bash
+sudo systemctl daemon-reload   # only needed if the .service file changed
+sudo systemctl restart flushtracker
 ```
 
 ---
