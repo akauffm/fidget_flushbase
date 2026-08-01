@@ -16,11 +16,14 @@ import datetime
 import json
 import requests
 
-# Try importing qrcode for QR generation
+# Try importing qrcode and PIL Image for QR generation
 try:
     import qrcode
+    from PIL import Image
     QRCODE_AVAILABLE = True
 except ImportError:
+    qrcode = None
+    Image = None
     QRCODE_AVAILABLE = False
 
 # Configuration Settings
@@ -124,7 +127,7 @@ def generate_qr_code(tracking_url, flush_id):
 
 def pil_image_to_escpos_raster(img_filename, target_width=256):
     """Converts a PNG image file into ESC/POS GS v 0 raster bit-image commands for 58mm thermal printers (256px width)."""
-    if not Image:
+    if Image is None:
         return b""
     try:
         with Image.open(img_filename) as im:
