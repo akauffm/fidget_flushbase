@@ -31,17 +31,24 @@ FIREBASE_PROJECT_ID = "flushbase"  # Replace with your Firebase Project ID
 PUBLIC_HOST_URL = "https://flushbase.web.app" # Replace with your deployed app URL (or http://<pi-ip>:8000)
 BUTTON_GPIO_PIN = 17 # GPIO pin connected to button (active low with internal pull-up)
 
-# Check GPIO Availability (Raspberry Pi vs Mac/PC Workstation)
-IS_RASPBERRY_PI = False
-try:
-    from gpiozero import Button
-    IS_RASPBERRY_PI = True
-except (ImportError, RuntimeError):
+def is_pi_hardware():
+    """Detects Raspberry Pi hardware from system device tree or cpuinfo."""
+    if os.path.exists('/proc/device-tree/model') or os.path.exists('/sys/firmware/devicetree/base/model'):
+        return True
     try:
-        import RPi.GPIO as GPIO
-        IS_RASPBERRY_PI = True
-    except (ImportError, RuntimeError):
-        IS_RASPBERRY_PI = False
+        with open('/proc/cpuinfo', 'r') as f:
+            content = f.read()
+            if 'Raspberry Pi' in content or 'BCM' in content or 'Hardware\t: BCM' in content:
+                return True
+    except Exception:
+        pass
+    return False
+
+# Explicit mode overrides via command-line flags
+FORCE_PI_MODE = "--pi" in sys.argv
+FORCE_WORKSTATION_MODE = "--workstation" in sys.argv or "--dev" in sys.argv
+
+IS_RASPBERRY_PI = (FORCE_PI_MODE or is_pi_hardware()) and not FORCE_WORKSTATION_MODE
 
 def generate_flush_id():
     """Generates a unique, short tracking ID like FLUSH-4E9A12"""
@@ -352,16 +359,50 @@ def main():
     print("==================================================")
 
     if IS_RASPBERRY_PI:
-        print(f" Running on Raspberry Pi! Listening on GPIO Pin {BUTTON_GPIO_PIN}...")
+        print(f" [✓] Raspberry Pi Hardware Detected! Setting up GPIO Pin {BUTTON_GPIO_PIN}...")
+        listener_started = False
+
+        # Try Backend 1: gpiozero
         try:
+            from gpiozero import Button
             button = Button(BUTTON_GPIO_PIN, pull_up=True, bounce_time=0.2)
             button.when_pressed = trigger_flush_event
+            print(f" [✓] Connected via gpiozero! Listening for button presses on GPIO {BUTTON_GPIO_PIN}...")
+            listener_started = True
             print(" Press physical button to generate a flush. (Press Ctrl+C to exit)")
             print(" TIP: Run 'python3 pi_button.py --test-gpio' to test wiring state.\n")
             while True:
                 time.sleep(0.1)
         except KeyboardInterrupt:
             print("\n Exiting FlushTracker Pi listener.")
+            sys.exit(0)
+        except Exception as err1:
+            print(f" [!] gpiozero initialization notice: {err1}")
+
+        # Try Backend 2: RPi.GPIO
+        if not listener_started:
+            try:
+                import RPi.GPIO as GPIO
+                GPIO.setmode(GPIO.BCM)
+                GPIO.setup(BUTTON_GPIO_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+
+                def on_gpi_event(channel):
+                    trigger_flush_event()
+
+                GPIO.add_event_detect(BUTTON_GPIO_PIN, GPIO.FALLING, callback=on_gpi_event, bouncetime=300)
+                print(f" [✓] Connected via RPi.GPIO! Listening for button presses on GPIO {BUTTON_GPIO_PIN}...")
+                print(" Press physical button to generate a flush. (Press Ctrl+C to exit)\n")
+                while True:
+                    time.sleep(0.1)
+            except KeyboardInterrupt:
+                print("\n Exiting FlushTracker Pi listener.")
+                sys.exit(0)
+            except Exception as err2:
+                print(f" [!] RPi.GPIO fallback notice: {err2}")
+                print("\n ⚠️  GPIO libraries not found or missing permissions.")
+                print("     Run this command on your Pi to install GPIO support:")
+                print("     pip install gpiozero rpi-lgpio")
+                print("     or: sudo apt install python3-gpiozero python3-rpi.gpio\n")
     else:
         print(" Running in Workstation / Development Mode.")
         print(" Press [ENTER] in terminal to trigger a new button flush! (Ctrl+C to quit)\n")
