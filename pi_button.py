@@ -221,6 +221,7 @@ def print_receipt(flush_id, formatted_time, tracking_url, qr_filename=None):
     dash_line = "-" * 28
 
     header_text = f"""
+ Thank you, come again!
 {divider}
  FIDGET CAMP FLUSH TRACKER
 1417 15th St -> Pier 80
@@ -337,6 +338,13 @@ def create_button(pin_num, bounce_time):
     except Exception as e:
         print(f" [!] Could not set up GPIO pin {pin_num} via gpiozero: {e}")
         print()
+        if "busy" in str(e).lower():
+            print(" The pin is already claimed by another process — most likely the")
+            print(" flushtracker systemd service is already running. Check with:")
+            print("   systemctl status flushtracker")
+            print(" To run this script manually, stop the service first:")
+            print("   sudo systemctl stop flushtracker")
+            sys.exit(1)
         print(" gpiozero needs a pin-driver backend (lgpio) to talk to the hardware.")
         print(" Fix it with ONE of the following, then re-run:")
         print("   System Python:   sudo apt install python3-gpiozero python3-lgpio")
