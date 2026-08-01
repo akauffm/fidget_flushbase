@@ -309,8 +309,18 @@ def trigger_flush_event():
     # 2. Generate QR code
     qr_filename = generate_qr_code(tracking_url, flush_id)
 
-    # 3. Print thermal receipt
-    print_receipt(flush_id, formatted_time, tracking_url, qr_filename)
+    # 3. Print thermal receipt and cleanup temporary files
+    try:
+        print_receipt(flush_id, formatted_time, tracking_url, qr_filename)
+    finally:
+        try:
+            if qr_filename and os.path.exists(qr_filename):
+                os.remove(qr_filename)
+            raw_bin = os.path.join(os.path.dirname(__file__), "last_receipt.bin")
+            if os.path.exists(raw_bin):
+                os.remove(raw_bin)
+        except Exception:
+            pass
 
 def main():
     print("==================================================")
