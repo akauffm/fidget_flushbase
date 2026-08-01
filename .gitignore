@@ -5,6 +5,7 @@ local_flushes.json
 qr_*.png
 last_receipt.txt
 receipt_counter.json
+test_receipt_output.bin
 __pycache__/
 firebase-debug.log
 .firebase/
