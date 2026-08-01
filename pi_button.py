@@ -234,36 +234,43 @@ def print_receipt(flush_id, formatted_time, tracking_url, qr_filename=None):
 
     # Send raw ESC/POS bytes to connected USB thermal receipt printer (/dev/usb/lp0)
     if os.path.exists("/dev/usb/lp0"):
+        raw_bytes = bytearray()
+        raw_bytes.extend(b"\x1b\x40")  # ESC @
+        raw_bytes.extend(header_text.encode('utf-8'))
+        raw_bytes.extend(b"\x1b\x61\x01")  # ESC a 1 (Center)
+
+        printed_qr = False
+        if qr_filename and os.path.exists(qr_filename):
+            raster_bytes = pil_image_to_escpos_raster(qr_filename)
+            if raster_bytes:
+                raw_bytes.extend(raster_bytes)
+                printed_qr = True
+
+        if not printed_qr:
+            raw_bytes.extend(generate_escpos_native_qr(tracking_url))
+
+        raw_bytes.extend(b"\x1b\x61\x00")  # ESC a 0 (Left)
+        raw_bytes.extend(footer_text.encode('utf-8'))
+        raw_bytes.extend(b"\x1d\x56\x41\x03")  # GS V (Cut)
+
         try:
             with open("/dev/usb/lp0", "wb") as printer:
-                # 1. Initialize printer
-                printer.write(b"\x1b\x40")  # ESC @
-                
-                # 2. Print Header Text
-                printer.write(header_text.encode('utf-8'))
-                
-                # 3. Center Align for QR Code
-                printer.write(b"\x1b\x61\x01")  # ESC a 1 (Center)
-                
-                # 4. Print QR Code Graphic (Raster bit-image or Native QR)
-                printed_qr = False
-                if qr_filename and os.path.exists(qr_filename):
-                    raster_bytes = pil_image_to_escpos_raster(qr_filename)
-                    if raster_bytes:
-                        printer.write(raster_bytes)
-                        printed_qr = True
-                
-                if not printed_qr:
-                    printer.write(generate_escpos_native_qr(tracking_url))
-                
-                # 5. Left Align & Print Footer Text
-                printer.write(b"\x1b\x61\x00")  # ESC a 0 (Left)
-                printer.write(footer_text.encode('utf-8'))
-                
-                # 6. Feed & Cut Paper
-                printer.write(b"\x1d\x56\x41\x03")  # GS V (Cut)
-                
+                printer.write(raw_bytes)
             print(" Printed thermal receipt with QR Code graphic to /dev/usb/lp0!")
+        except PermissionError:
+            print(" [!] Permission denied accessing /dev/usb/lp0!")
+            print("     To fix permission, run this command in terminal:")
+            print("     sudo chmod 666 /dev/usb/lp0   (or: sudo usermod -a -G lp $USER)")
+            # Attempt CUPS fallback
+            try:
+                raw_bin = os.path.join(os.path.dirname(__file__), "last_receipt.bin")
+                with open(raw_bin, "wb") as f:
+                    f.write(raw_bytes)
+                res = subprocess.run(["lpr", "-o", "raw", raw_bin], capture_output=True)
+                if res.returncode == 0:
+                    print(" [✓] Successfully printed via CUPS fallback (lpr -o raw)!")
+            except Exception:
+                pass
         except Exception as err:
             print(f" Could not write to /dev/usb/lp0: {err}")
 
