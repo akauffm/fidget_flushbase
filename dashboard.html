@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlushBase Mission Control - Live Flush Dashboard</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        amazon: {
+                            navy: '#131921',
+                            lightNavy: '#232f3e',
+                            blue: '#007185',
+                            accentBlue: '#008296',
+                            yellow: '#FFD814',
+                            yellowHover: '#F7CA00',
+                            orange: '#FFA41C',
+                            grayBg: '#EAEDED',
+                            green: '#067D62'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'Ember', 'Helvetica Neue', 'Arial', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Firebase SDK Compat libraries -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="firebase_config.js"></script>
+    <style>
+        @keyframes flush-arrive {
+            0% { background-color: #fef9c3; transform: translateY(-6px); opacity: 0; }
+            30% { opacity: 1; transform: translateY(0); }
+            100% { background-color: #ffffff; }
+        }
+        .flush-arrive { animation: flush-arrive 2.5s ease-out; }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.35; }
+        }
+        .pulse-dot { animation: pulse-dot 1.6s ease-in-out infinite; }
+    </style>
+</head>
+
+<body class="bg-amazon-grayBg min-h-screen text-gray-900 font-sans pb-12 antialiased">
+
+    <!-- Top Navigation Header -->
+    <header class="bg-amazon-navy text-white sticky top-0 z-50 shadow-md">
+        <div class="max-w-4xl mx-auto px-4 py-3">
+            <div class="flex items-center justify-between gap-3">
+                <div class="flex items-center gap-3">
+                    <img src="toilet.png" alt="FlushBase logo" class="h-8 w-8 invert">
+                    <div>
+                        <h1 class="text-base sm:text-lg font-extrabold tracking-tight leading-tight">FlushBase Mission Control</h1>
+                        <p class="text-[11px] text-gray-300 leading-tight">Live flush telemetry · 1417 15th St → SF Bay</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span id="live-badge" class="hidden items-center gap-1.5 text-[11px] font-mono font-bold bg-emerald-900/60 text-emerald-300 px-2.5 py-1 rounded border border-emerald-700">
+                        <span class="w-2 h-2 rounded-full bg-emerald-400 pulse-dot inline-block"></span> LIVE
+                    </span>
+                    <a href="flushtracker.html" class="text-[11px] sm:text-xs text-gray-300 hover:text-white underline underline-offset-2">
+                        <i class="fa-solid fa-magnifying-glass-location mr-1"></i>Tracker
+                    </a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-4xl mx-auto px-3 sm:px-4 pt-4 space-y-4">
+
+        <!-- Stats Row -->
+        <section class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div class="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
+                <div class="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Flushes Today</div>
+                <div id="stat-today" class="text-2xl font-extrabold text-amazon-blue mt-1">–</div>
+            </div>
+            <div class="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
+                <div class="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Gallons Today</div>
+                <div id="stat-gallons" class="text-2xl font-extrabold text-cyan-700 mt-1">–</div>
+            </div>
+            <div class="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
+                <div class="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Total Flushes</div>
+                <div id="stat-total" class="text-2xl font-extrabold text-gray-800 mt-1">–</div>
+            </div>
+            <div class="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
+                <div class="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Last Flush</div>
+                <div id="stat-last" class="text-lg font-bold text-gray-800 mt-1.5">–</div>
+            </div>
+        </section>
+
+        <!-- Notifications opt-in -->
+        <section class="bg-white rounded-xl p-4 border border-gray-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+                <h2 class="text-sm font-bold text-gray-900"><i class="fa-solid fa-bell text-amazon-orange mr-1.5"></i>Flush Notifications</h2>
+                <p id="notify-desc" class="text-xs text-gray-500 mt-0.5">Get a browser notification the moment someone flushes. Works while this page is open (even in a background tab).</p>
+            </div>
+            <button id="notify-btn" onclick="toggleNotifications()"
+                class="shrink-0 bg-amazon-yellow hover:bg-amazon-yellowHover text-gray-900 text-sm font-semibold px-4 py-2 rounded-lg shadow-sm border border-yellow-500/40">
+                Enable Notifications
+            </button>
+        </section>
+
+        <!-- Live Feed -->
+        <section class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                <h2 class="text-sm font-bold text-gray-900">
+                    <i class="fa-solid fa-toilet text-amazon-blue mr-1.5"></i>Live Flush Feed
+                </h2>
+                <span id="feed-count" class="text-[11px] text-gray-400 font-mono"></span>
+            </div>
+            <div id="feed-status" class="px-4 py-8 text-center text-sm text-gray-400">
+                <i class="fa-solid fa-circle-notch fa-spin mr-2"></i>Connecting to FlushBase...
+            </div>
+            <ul id="feed-list" class="divide-y divide-gray-100"></ul>
+        </section>
+
+        <p class="text-center text-[11px] text-gray-400">FlushBase Mission Control · 2026 Fidget Camp Showcase</p>
+    </main>
+
+    <script>
+        const GPF = 1.6;
+        const MAX_FEED = 100;
+        let knownIds = new Set();
+        let initialLoadDone = false;
+        let flushDocs = []; // newest first
+
+        // --- Notifications (browser Notification API) ---
+        function notificationsEnabled() {
+            return ('Notification' in window) &&
+                Notification.permission === 'granted' &&
+                localStorage.getItem('flushNotify') === 'on';
+        }
+
+        function updateNotifyUI() {
+            const btn = document.getElementById('notify-btn');
+            const desc = document.getElementById('notify-desc');
+            if (!('Notification' in window)) {
+                btn.disabled = true;
+                btn.textContent = 'Not supported';
+                btn.className = btn.className.replace('bg-amazon-yellow hover:bg-amazon-yellowHover', 'bg-gray-200 text-gray-400');
+                return;
+            }
+            if (Notification.permission === 'denied') {
+                btn.disabled = true;
+                btn.textContent = 'Blocked in browser';
+                desc.textContent = 'Notifications are blocked for this site — re-enable them in your browser’s site settings.';
+                return;
+            }
+            if (notificationsEnabled()) {
+                btn.innerHTML = '<i class="fa-solid fa-bell-slash mr-1.5"></i>Disable Notifications';
+            } else {
+                btn.innerHTML = '<i class="fa-solid fa-bell mr-1.5"></i>Enable Notifications';
+            }
+        }
+
+        function toggleNotifications() {
+            if (notificationsEnabled()) {
+                localStorage.setItem('flushNotify', 'off');
+                updateNotifyUI();
+                return;
+            }
+            Notification.requestPermission().then((perm) => {
+                if (perm === 'granted') {
+                    localStorage.setItem('flushNotify', 'on');
+                    new Notification('FlushBase notifications enabled 🚽', {
+                        body: 'You’ll be notified the moment a flush happens.',
+                        icon: 'toilet.png'
+                    });
+                }
+                updateNotifyUI();
+            });
+        }
+
+        function notifyFlush(flush) {
+            if (!notificationsEnabled()) return;
+            const n = new Notification(`🚽 New Flush: ${flush.id}`, {
+                body: `${flush.gpf || GPF} gal flush departed 1417 15th St. ETA to SEP ~35 min.`,
+                icon: 'toilet.png',
+                tag: flush.id
+            });
+            n.onclick = () => {
+                window.open(`flushtracker.html?id=${flush.id}`, '_blank');
+                n.close();
+            };
+        }
+
+        // --- Rendering ---
+        function relativeTime(ms) {
+            const sec = Math.max(0, (Date.now() - ms) / 1000);
+            if (sec < 60) return `${Math.floor(sec)}s ago`;
+            if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+            if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
+            return `${Math.floor(sec / 86400)}d ago`;
+        }
+
+        function journeyStage(ms) {
+            const sec = (Date.now() - ms) / 1000;
+            if (sec < 100) return { label: 'IN LATERAL', cls: 'bg-blue-100 text-blue-800 border-blue-200' };
+            if (sec < 2100) return { label: 'IN TRANSIT', cls: 'bg-cyan-100 text-cyan-800 border-cyan-200' };
+            if (sec < 2100 + 86400) return { label: 'AT SEP PLANT', cls: 'bg-amber-100 text-amber-800 border-amber-200' };
+            return { label: 'DISCHARGED', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200' };
+        }
+
+        function renderFeed() {
+            const list = document.getElementById('feed-list');
+            const rows = flushDocs.slice(0, MAX_FEED).map((f) => {
+                const stage = journeyStage(f.timestamp);
+                const icon = '🚽';
+                return `
+                <li class="px-4 py-3 flex items-center gap-3 ${f._isNew ? 'flush-arrive' : ''}" data-ts="${f.timestamp}">
+                    <div class="w-9 h-9 rounded-full bg-amazon-grayBg flex items-center justify-center text-lg shrink-0">${icon}</div>
+                    <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <a href="flushtracker.html?id=${f.id}" class="font-mono font-bold text-sm text-amazon-blue hover:underline">${f.id}</a>
+                            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full border ${stage.cls}">${stage.label}</span>
+                        </div>
+                        <div class="text-xs text-gray-500 mt-0.5">${f.formatted_time || ''} · ${f.gpf || GPF} G flush</div>
+                    </div>
+                    <div class="text-xs text-gray-400 font-mono shrink-0 feed-rel">${relativeTime(f.timestamp)}</div>
+                </li>`;
+            });
+            list.innerHTML = rows.join('');
+            document.getElementById('feed-count').textContent = `showing ${Math.min(flushDocs.length, MAX_FEED)}`;
+            flushDocs.forEach(f => f._isNew = false);
+        }
+
+        function renderStats() {
+            const startOfDay = new Date();
+            startOfDay.setHours(0, 0, 0, 0);
+            const todayFlushes = flushDocs.filter(f => f.timestamp >= startOfDay.getTime());
+            document.getElementById('stat-today').textContent = todayFlushes.length;
+            document.getElementById('stat-gallons').textContent =
+                todayFlushes.reduce((sum, f) => sum + (Number(f.gpf) || GPF), 0).toFixed(1);
+            document.getElementById('stat-total').textContent = flushDocs.length;
+            document.getElementById('stat-last').textContent =
+                flushDocs.length ? relativeTime(flushDocs[0].timestamp) : 'None yet';
+        }
+
+        // Refresh relative timestamps & stage badges without waiting for new data
+        setInterval(() => {
+            if (flushDocs.length) { renderFeed(); renderStats(); }
+        }, 30000);
+
+        // --- Firestore live listener ---
+        function startListener() {
+            const statusEl = document.getElementById('feed-status');
+            if (typeof firebase === 'undefined' || !firebaseConfig || firebaseConfig.projectId === 'YOUR_PROJECT_ID') {
+                statusEl.innerHTML = '<i class="fa-solid fa-triangle-exclamation mr-2"></i>Firebase is not configured.';
+                return;
+            }
+            if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+            const db = firebase.firestore();
+
+            db.collection('flushes')
+                .orderBy('timestamp', 'desc')
+                .limit(MAX_FEED)
+                .onSnapshot((snap) => {
+                    snap.docChanges().forEach((change) => {
+                        if (change.type !== 'added') return;
+                        const data = change.doc.data();
+                        const flush = {
+                            id: change.doc.id,
+                            timestamp: Number(data.timestamp) || 0,
+                            formatted_time: data.formatted_time,
+                            gpf: data.gpf,
+                            waste_type: data.waste_type,
+                            _isNew: initialLoadDone
+                        };
+                        if (knownIds.has(flush.id)) return;
+                        knownIds.add(flush.id);
+                        flushDocs.push(flush);
+                        if (initialLoadDone) notifyFlush(flush);
+                    });
+
+                    flushDocs.sort((a, b) => b.timestamp - a.timestamp);
+                    initialLoadDone = true;
+
+                    statusEl.style.display = flushDocs.length ? 'none' : '';
+                    if (!flushDocs.length) {
+                        statusEl.innerHTML = '<i class="fa-solid fa-toilet-paper mr-2"></i>No flushes yet. Awaiting the first press of the button...';
+                    }
+                    document.getElementById('live-badge').classList.remove('hidden');
+                    document.getElementById('live-badge').classList.add('inline-flex');
+                    renderFeed();
+                    renderStats();
+                }, (err) => {
+                    console.error('Firestore listener error:', err);
+                    statusEl.innerHTML = `<i class="fa-solid fa-triangle-exclamation mr-2"></i>Connection error: ${err.message}`;
+                    document.getElementById('live-badge').classList.add('hidden');
+                });
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            updateNotifyUI();
+            startListener();
+        });
+    </script>
+</body>
+
+</html>

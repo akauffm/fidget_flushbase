@@ -30,6 +30,7 @@ except ImportError:
 FIREBASE_PROJECT_ID = "flushbase"  # Replace with your Firebase Project ID
 PUBLIC_HOST_URL = "https://flushbase.web.app" # Replace with your deployed app URL (or http://<pi-ip>:8000)
 BUTTON_GPIO_PIN = 17 # GPIO pin connected to button (active low with internal pull-up)
+FLUSH_COOLDOWN_SECONDS = 5 # Minimum seconds between flushes (guards against bouncy/miswired buttons)
 
 def is_pi_hardware():
     """Detects Raspberry Pi hardware from system device tree or cpuinfo."""
@@ -72,7 +73,7 @@ def save_to_firestore(flush_id, timestamp_ms, formatted_time):
             "timestamp": timestamp_ms,
             "formatted_time": formatted_time,
             "gpf": 1.6,
-            "waste_type": "liquid",
+            "waste_type": "unknown",
             "origin": "1417 15th St, San Francisco, CA"
         }
         with open(local_db_path, 'w') as f:
@@ -86,7 +87,7 @@ def save_to_firestore(flush_id, timestamp_ms, formatted_time):
             "timestamp": {"integerValue": str(timestamp_ms)},
             "formatted_time": {"stringValue": formatted_time},
             "gpf": {"doubleValue": 1.6},
-            "waste_type": {"stringValue": "liquid"},
+            "waste_type": {"stringValue": "unknown"},
             "origin": {"stringValue": "1417 15th St, San Francisco, CA"}
         }
     }
@@ -144,6 +145,10 @@ def pil_image_to_escpos_raster(img_filename, target_width=200):
 
     try:
         with Image.open(img_filename) as im:
+            # Flatten transparency onto white, otherwise transparent pixels print black
+            if im.mode in ('RGBA', 'LA') or (im.mode == 'P' and 'transparency' in im.info):
+                bg = Image.new('RGBA', im.size, (255, 255, 255, 255))
+                im = Image.alpha_composite(bg, im.convert('RGBA')).convert('RGB')
             w, h = im.size
             aspect = h / float(w)
             new_w = min(w, target_width)
@@ -220,15 +225,17 @@ def print_receipt(flush_id, formatted_time, tracking_url, qr_filename=None):
     divider = "=" * 28
     dash_line = "-" * 28
 
+    toilet_png = os.path.join(os.path.dirname(__file__), "toilet.png")
+    greeting_text = "Thank you, come again!\n\n"
+
     header_text = f"""
- Thank you, come again!
 {divider}
  FIDGET CAMP FLUSH TRACKER
 1417 15th St -> Pier 80
 {divider}
 ID:       {flush_id}
 DATE:     {formatted_time}
-TYPE:     Liquid (1.6 GPF)
+TYPE:     1.6 G Flush
 ORIGIN:   1417 15th St, SF
 DEST:     Pier 80 Outfall
 {dash_line}
@@ -246,7 +253,7 @@ SCAN QR CODE TO TRACK LIVE:
 You are satisfied customer #{customer_num}
 {divider}
 """
-    full_receipt_text = header_text + "\n [ QR CODE GRAPHIC ]\n" + footer_text
+    full_receipt_text = "\n    [ TOILET GRAPHIC ]\n   " + greeting_text + header_text + "\n [ QR CODE GRAPHIC ]\n" + footer_text
     print(full_receipt_text)
     
     # Save receipt copy
@@ -258,6 +265,16 @@ You are satisfied customer #{customer_num}
     if os.path.exists("/dev/usb/lp0"):
         raw_bytes = bytearray()
         raw_bytes.extend(b"\x1b\x40")  # ESC @
+
+        # Centered toilet graphic + greeting at the very top
+        raw_bytes.extend(b"\x1b\x61\x01")  # ESC a 1 (Center)
+        toilet_raster = pil_image_to_escpos_raster(toilet_png, target_width=240)
+        if toilet_raster:
+            raw_bytes.extend(b"\n")
+            raw_bytes.extend(toilet_raster)
+        raw_bytes.extend(greeting_text.encode('utf-8'))
+        raw_bytes.extend(b"\x1b\x61\x00")  # ESC a 0 (Left)
+
         raw_bytes.extend(header_text.encode('utf-8'))
         raw_bytes.extend(b"\x1b\x61\x01")  # ESC a 1 (Center)
 
@@ -384,7 +401,30 @@ def main():
     if IS_RASPBERRY_PI:
         print(f" [✓] Raspberry Pi Hardware Detected! Setting up GPIO Pin {BUTTON_GPIO_PIN}...")
         button = create_button(BUTTON_GPIO_PIN, bounce_time=0.2)
-        button.when_pressed = trigger_flush_event
+
+        # Sample the button's resting state at startup so both normally-open and
+        # normally-closed wiring work: a flush fires on any change AWAY from the
+        # resting state, and the button must return to rest before it can fire again.
+        time.sleep(0.5)  # let the pull-up settle
+        resting_state = button.is_pressed
+        wiring = "CLOSED at rest (normally-closed)" if resting_state else "OPEN at rest (normally-open)"
+        print(f" [i] Button wiring detected: {wiring}. Flush fires when that state changes.")
+
+        last_flush = [0.0]
+
+        def on_state_change():
+            now_ts = time.monotonic()
+            if now_ts - last_flush[0] < FLUSH_COOLDOWN_SECONDS:
+                print(f" [~] Button event ignored (cooldown, {FLUSH_COOLDOWN_SECONDS}s between flushes).")
+                return
+            last_flush[0] = now_ts
+            trigger_flush_event()
+
+        if resting_state:
+            button.when_released = on_state_change
+        else:
+            button.when_pressed = on_state_change
+
         print(f" [✓] Connected via gpiozero! Listening for button presses on GPIO {BUTTON_GPIO_PIN}...")
         print(" Press physical button to generate a flush. (Press Ctrl+C to exit)\n")
         try:

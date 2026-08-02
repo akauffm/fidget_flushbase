@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FlushTracker - 1417 15th St to SF Bay</title>
+    <title>Push Notification - 1417 15th St to SF Bay</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -104,12 +104,13 @@
                     class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-yellow-400/20 text-yellow-300 text-xs font-semibold mb-3 border border-yellow-400/30 shadow-sm">
                     <span>✨ 2026 Fidget Camp Showcase</span>
                 </div>
-                <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight text-white mb-2">
-                    SFPUC FlushTracker
+                <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight text-white mb-2 flex items-center gap-3">
+                    <img src="toilet.png" alt="FlushTracker logo" class="h-10 w-10 sm:h-12 sm:w-12 invert">
+                    Push Notification Flush Tracking
                 </h1>
                 <p class="text-sm sm:text-base text-slate-200 font-medium leading-relaxed mb-3">
                     This web app tracks what you deposited at the 2026 Fidget Camp Showcase as it makes its way from the
-                    venue to the Bay.
+                    bowl to the Bay.
                 </p>
                 <p class="text-xs sm:text-sm text-yellow-300 font-medium mb-4 flex items-center gap-1.5">
                     <i class="fa-solid fa-circle-info"></i> Enter a tracking number or scan the QR code on your receipt
@@ -230,7 +231,7 @@
                     <div>
                         <span class="font-bold block text-sm" id="status-title">Undergoing Multi-Stage Digestion at
                             Southeast Plant (SEP)</span>
-                        <p id="status-desc" class="mt-0.5 text-gray-700">Wastewater has entered 750 Phelps St (~15 min
+                        <p id="status-desc" class="mt-0.5 text-gray-700">Wastewater has entered 750 Phelps St (~35 min
                             transit time). Primary clarifiers are settling heavy organic solids while aerobic bacteria
                             break
                             down organic matter in 24-hour treatment cycle.</p>
@@ -488,7 +489,7 @@
                             </div>
                             <div>
                                 <span class="text-gray-500 block">Transit Time to SEP:</span>
-                                <span class="font-medium text-gray-800">~15 Minutes</span>
+                                <span class="font-medium text-gray-800">~35 Minutes</span>
                             </div>
                             <div>
                                 <span class="text-gray-500 block">Liquid Treatment Time:</span>
@@ -751,13 +752,40 @@
             [37.75037559393314, -122.37329860682091] // 9. SF Bay Deepwater Outfall (800 ft offshore near Pier 80)
         ];
 
-        // Step definitions with realistic hydraulic timing (15 min transit, 24 hr liquid treatment)
+        // --- Hydraulic timing model ---
+        // Distances come from the route geometry itself; velocities set the clock.
+        function distanceFt(a, b) {
+            const R = 20902231; // Earth radius in feet
+            const toRad = (d) => d * Math.PI / 180;
+            const dLat = toRad(b[0] - a[0]);
+            const dLng = toRad(b[1] - a[1]);
+            const h = Math.sin(dLat / 2) ** 2 +
+                Math.cos(toRad(a[0])) * Math.cos(toRad(b[0])) * Math.sin(dLng / 2) ** 2;
+            return 2 * R * Math.asin(Math.sqrt(h));
+        }
+
+        function pathDistanceFt(points) {
+            let total = 0;
+            for (let i = 0; i < points.length - 1; i++) total += distanceFt(points[i], points[i + 1]);
+            return total;
+        }
+
+        const LATERAL_FT_PER_SEC = 2.5;  // 4-inch private lateral (gravity flow)
+        const MAINS_FT_PER_SEC = 8.0;    // Street mains & trunk lines
+
+        const LATERAL_FT = distanceFt(sewerPathCoordinates[0], sewerPathCoordinates[1]);      // ~250 ft
+        const MAINS_FT = pathDistanceFt(sewerPathCoordinates.slice(1, 8));                    // ~16,000 ft to SEP
+        const LATERAL_SEC = LATERAL_FT / LATERAL_FT_PER_SEC;                                  // ~100 s
+        const SEP_ARRIVAL_SEC = LATERAL_SEC + MAINS_FT / MAINS_FT_PER_SEC;                    // ~35 min
+        const TREATMENT_SEC = 24 * 3600;                                                      // 24 hr liquid cycle
+
+        // Step definitions with realistic hydraulic timing (~35 min transit at 8 ft/s mains, 24 hr liquid treatment)
         const stepData = [
             {
                 headline: "Flushed at 1417 15th St",
                 statusTitle: "Flowing through Private Property Lateral Pipe",
                 statusDesc: "Flush initiated at 1417 15th St. Gravity is moving 1.6 gallons down the 4-inch lateral pipe towards the public street main under 15th Street.",
-                eta: "~15 min to SEP, ~24 hr to Bay",
+                eta: "~35 min to SEP, ~24 hr to Bay",
                 distance: "0.1 miles",
                 progressWidth: "10%",
                 coordsIndex: 0,
@@ -768,21 +796,21 @@
             {
                 headline: "In Transit through Street Main",
                 statusTitle: "Navigating Channel Basin Sewer Main",
-                statusDesc: "Flowing eastward down the Mission District gradient in the Channel Basin network. Reaches Southeast Plant (SEP) in approximately 15 minutes.",
-                eta: "~10 min to SEP, ~24 hr to Bay",
-                distance: "1.2 miles",
+                statusDesc: "Flowing eastward down the Mission District gradient in the Channel Basin network. At 8 ft/sec, it reaches the Southeast Plant (SEP) roughly 35 minutes after the flush.",
+                eta: "~25 min to SEP, ~24 hr to Bay",
+                distance: "1.7 miles",
                 progressWidth: "38%",
                 coordsIndex: 3,
                 icon: '🌊',
-                velocity: '~3.8 ft/sec (Trunk Line)',
+                velocity: '~8 ft/sec (Trunk Line)',
                 location: '15th & Mission St Main Trunk'
             },
             {
                 headline: "Undergoing Treatment at SEP",
                 statusTitle: "Multi-Stage Processing at Southeast Treatment Plant",
-                statusDesc: "Wastewater entered 750 Phelps St (~15 min total transit time). Currently undergoing 24-hour retention in primary settling tanks & secondary biological aerobic digesters.",
-                eta: "~24 Hours (Liquid Disinfection Cycle)",
-                distance: "3.2 miles",
+                statusDesc: "Wastewater entered 750 Phelps St (~35 min total transit time at 8 ft/sec). The liquid portion is undergoing a 24-hour disinfection cycle; any solid content settles out in primary clarifiers for multi-week anaerobic digestion.",
+                eta: "~24 Hours (Liquid-Phase Treatment)",
+                distance: "3.0 miles",
                 progressWidth: "68%",
                 coordsIndex: 7,
                 icon: '🧪',
@@ -792,9 +820,9 @@
             {
                 headline: "Discharged into San Francisco Bay",
                 statusTitle: "Effluent Released Offshore into Deepwater Outfall",
-                statusDesc: "24-hour treatment & disinfection complete! High-quality disinfected effluent released offshore into San Francisco Bay. Removed solids undergo multi-week anaerobic digestion into Class A biosolids.",
+                statusDesc: "24-hour treatment & disinfection complete! The disinfected liquid effluent has been released offshore into San Francisco Bay — while any solids removed at the plant continue multi-week anaerobic digestion into Class A biosolids.",
                 eta: "Discharged (24 Hr Complete)",
-                distance: "3.8 miles",
+                distance: "4.0 miles",
                 progressWidth: "100%",
                 coordsIndex: 8,
                 icon: '💧',
@@ -822,22 +850,22 @@
                     headline: "Flushed at 1417 15th St (Liquid)",
                     statusTitle: "Rapid Lateral Transit (Liquid Waste)",
                     statusDesc: "1.6 gallons of liquid waste (urine & greywater) instantly flushes down the 4-inch private lateral line from 1417 15th St. Liquid moves fluidly without friction, joining the street main under 15th Street within seconds.",
-                    eta: "~12 min to SEP, ~14 hr to Bay",
+                    eta: "~35 min to SEP, ~14 hr to Bay",
                     distance: "0.1 miles",
                     coordsIndex: 0,
                     icon: '💧',
-                    velocity: '~3.0 ft/sec (High Fluid Velocity)',
+                    velocity: '~2.5 ft/sec (Lateral Gravity Flow)',
                     location: '1417 15th St Private Lateral'
                 },
                 {
                     headline: "In Transit through Street Main (Liquid)",
                     statusTitle: "Flowing through Mission District Sewer Main",
                     statusDesc: "Liquid waste accelerates down the Mission District grade through the Channel Basin combined sewer main. Dissolved nutrients and fluids move continuously towards the Southeast Treatment Plant (SEP) without settling.",
-                    eta: "~8 min to SEP, ~14 hr to Bay",
-                    distance: "1.2 miles",
+                    eta: "~25 min to SEP, ~14 hr to Bay",
+                    distance: "1.7 miles",
                     coordsIndex: 3,
                     icon: '🌊',
-                    velocity: '~4.2 ft/sec (Trunk Flow)',
+                    velocity: '~8 ft/sec (Trunk Flow)',
                     location: '15th & Mission St Main Trunk'
                 },
                 {
@@ -845,7 +873,7 @@
                     statusTitle: "Secondary Biological Aeration & Disinfection",
                     statusDesc: "At 750 Phelps St, liquid wastewater bypasses heavy sludge settling and enters aerobic aeration basins. Microorganisms break down dissolved organics, followed by sodium hypochlorite disinfection in a ~10-14 hour retention cycle.",
                     eta: "~12-14 Hours (Disinfection Cycle)",
-                    distance: "3.2 miles",
+                    distance: "3.0 miles",
                     coordsIndex: 7,
                     icon: '🧪',
                     velocity: '12-14 Hr Biological Aeration & Chlorine Contact',
@@ -856,7 +884,7 @@
                     statusTitle: "Clean Treated Effluent Released to SF Bay",
                     statusDesc: "Disinfected, high-clarity liquid effluent is pumped through the deepwater outfall near Pier 80 (37.7504, -122.3733) into the deep Bayside channel, safely merging into San Francisco Bay currents.",
                     eta: "Discharged (Treatment Complete)",
-                    distance: "3.8 miles",
+                    distance: "4.0 miles",
                     coordsIndex: 8,
                     icon: '💧',
                     velocity: 'Deepwater Outfall Release',
@@ -868,7 +896,7 @@
                     headline: "Flushed at 1417 15th St (Solid Payload)",
                     statusTitle: "Organic Solid Payload Flush",
                     statusDesc: "Organic solids and toilet paper are flushed from 1417 15th St. Water momentum pushes the solid mass through the 4-inch lateral pipe toward the main sewer line under 15th Street.",
-                    eta: "~15 min to SEP, weeks for Biosolids",
+                    eta: "~40 min to SEP, weeks for Biosolids",
                     distance: "0.1 miles",
                     coordsIndex: 0,
                     icon: '💩',
@@ -879,11 +907,11 @@
                     headline: "In Transit through Street Main (Solid)",
                     statusTitle: "Main Trunk Conveyance & Bar Screening",
                     statusDesc: "Solid matter travels along the invert of the Channel Basin trunk line. Upon arrival at SEP headworks, automated bar screens catch coarse non-biodegradable debris while organic solids proceed to primary tanks.",
-                    eta: "~10 min to SEP, multi-week digestion",
-                    distance: "1.2 miles",
+                    eta: "~30 min to SEP, multi-week digestion",
+                    distance: "1.7 miles",
                     coordsIndex: 3,
                     icon: '🧱',
-                    velocity: '~3.5 ft/sec (Sediment Transport)',
+                    velocity: '~6.5 ft/sec (Sediment Transport)',
                     location: 'Channel Basin Main & Headworks'
                 },
                 {
@@ -891,7 +919,7 @@
                     statusTitle: "Primary Clarification & 38-Day Anaerobic Digesters",
                     statusDesc: "Heavy organic solids settle into primary sludge in large clarifiers at 750 Phelps St. Sludge is pumped into anaerobic digesters heated to 98°F where microbes break down solids over 38 days into biogas and Class A biosolids.",
                     eta: "~38 Days (Biosolids Processing)",
-                    distance: "3.2 miles",
+                    distance: "3.0 miles",
                     coordsIndex: 7,
                     icon: '⚙️',
                     velocity: '38-Day Anaerobic Thermophilic Digestion',
@@ -902,7 +930,7 @@
                     statusTitle: "Effluent Released + Class A Biosolids Recycled",
                     statusDesc: "Liquid portion discharges safely into SF Bay at Pier 80 outfall. The digested organic solids are dewatered into nutrient-rich Class A biosolids and recycled as agricultural fertilizer for California soil!",
                     eta: "Recycled Biosolids & Bay Release",
-                    distance: "3.8 miles",
+                    distance: "4.0 miles",
                     coordsIndex: 8,
                     icon: '🌱',
                     velocity: 'Outfall Release & Agricultural Recycling',
@@ -943,6 +971,41 @@
             const segmentFactor = targetSegmentFloat - segmentIdx;
 
             return interpolateCoord(points[segmentIdx], points[segmentIdx + 1], segmentFactor);
+        }
+
+        // Returns the array of coordinates from points[0] up to the interpolated
+        // position at progressRatio — the "traversed so far" path including its moving tip
+        function pathUpTo(points, progressRatio) {
+            if (!points || points.length === 0) return [];
+            if (progressRatio <= 0) return [points[0]];
+            if (progressRatio >= 1) return points.slice();
+
+            const totalSegments = points.length - 1;
+            const targetSegmentFloat = progressRatio * totalSegments;
+            const segmentIdx = Math.min(Math.floor(targetSegmentFloat), totalSegments - 1);
+            const segmentFactor = targetSegmentFloat - segmentIdx;
+
+            const traversed = points.slice(0, segmentIdx + 1);
+            traversed.push(interpolateCoord(points[segmentIdx], points[segmentIdx + 1], segmentFactor));
+            return traversed;
+        }
+
+        // Walk along the path by physical distance so speed is constant regardless
+        // of how long each individual segment is. Returns traversed coords + tip.
+        function pathUpToByDistance(points, targetFt) {
+            const out = [points[0]];
+            let remaining = targetFt;
+            for (let i = 0; i < points.length - 1; i++) {
+                const d = distanceFt(points[i], points[i + 1]);
+                if (remaining >= d) {
+                    out.push(points[i + 1]);
+                    remaining -= d;
+                } else {
+                    out.push(interpolateCoord(points[i], points[i + 1], remaining / d));
+                    return out;
+                }
+            }
+            return out;
         }
 
         function initFlushTracking() {
@@ -1000,8 +1063,8 @@
                     fetchLocalFlushFallback(activeFlushId);
                 }
 
-                // Poll every 2 seconds for position updates
-                setInterval(updateRealtimeTrackingUI, 2000);
+                // Update every second so the path tip crawls rather than jumps
+                setInterval(updateRealtimeTrackingUI, 1000);
             } else {
                 // User is NOT tracking a flush: Show Landing Banner, hide live tracking sections & top tracking ID
                 if (landingBanner) landingBanner.classList.remove('hidden');
@@ -1039,40 +1102,48 @@
 
             let stepIdx = 0;
             let currentPosition = sewerPathCoordinates[0];
+            let solidCoords = [sewerPathCoordinates[0]];
             let progressPercent = 0;
 
-            if (elapsedSec < 120) {
-                // Phase 1: Lateral Pipe (0 to 2 min -> 0% to 15%)
+            if (elapsedSec < LATERAL_SEC) {
+                // Phase 1: Private lateral at ~2.5 ft/s (~100 s -> 0% to 10%)
                 stepIdx = 0;
-                const ratio = elapsedSec / 120;
-                progressPercent = ratio * 15;
-                currentPosition = interpolatePath(sewerPathCoordinates.slice(0, 3), ratio);
-            } else if (elapsedSec < 900) {
-                // Phase 2: Street Main (2 min to 15 min -> 15% to 68%)
+                const traveledFt = elapsedSec * LATERAL_FT_PER_SEC;
+                progressPercent = (elapsedSec / LATERAL_SEC) * 10;
+                solidCoords = pathUpToByDistance(sewerPathCoordinates.slice(0, 2), traveledFt);
+                currentPosition = solidCoords[solidCoords.length - 1];
+            } else if (elapsedSec < SEP_ARRIVAL_SEC) {
+                // Phase 2: Street mains & trunk lines at 8 ft/s (~35 min to SEP -> 10% to 68%)
                 stepIdx = 1;
-                const ratio = (elapsedSec - 120) / (900 - 120);
-                progressPercent = 15 + (ratio * 53);
-                currentPosition = interpolatePath(sewerPathCoordinates.slice(2, 8), ratio);
-            } else if (elapsedSec < 86400) {
-                // Phase 3: Treatment at SEP (15 min to 24 hr -> 68% to 95%)
+                const traveledFt = (elapsedSec - LATERAL_SEC) * MAINS_FT_PER_SEC;
+                progressPercent = 10 + ((elapsedSec - LATERAL_SEC) / (SEP_ARRIVAL_SEC - LATERAL_SEC)) * 58;
+                solidCoords = [sewerPathCoordinates[0]].concat(pathUpToByDistance(sewerPathCoordinates.slice(1, 8), traveledFt));
+                currentPosition = solidCoords[solidCoords.length - 1];
+            } else if (elapsedSec < SEP_ARRIVAL_SEC + TREATMENT_SEC) {
+                // Phase 3: 24-hour treatment at SEP (-> 68% to 95%)
                 stepIdx = 2;
-                const ratio = (elapsedSec - 900) / (86400 - 900);
+                const ratio = (elapsedSec - SEP_ARRIVAL_SEC) / TREATMENT_SEC;
                 progressPercent = 68 + (ratio * 27);
+                solidCoords = sewerPathCoordinates.slice(0, 8);
                 currentPosition = sewerPathCoordinates[7];
             } else {
-                // Phase 4: SF Bay Outfall Release (> 24 hr -> 100%)
+                // Phase 4: SF Bay Outfall Release (-> 100%)
                 stepIdx = 3;
                 progressPercent = 100;
+                solidCoords = sewerPathCoordinates.slice();
                 currentPosition = sewerPathCoordinates[8];
             }
 
-            // Update main map marker position
+            // Sync visual stepper node FIRST (setStep snaps marker & line to the
+            // step waypoint), then apply the smooth interpolated position on top
+            setStep(stepIdx);
+
             if (mainFlushMarker) {
                 mainFlushMarker.setLatLng(currentPosition);
             }
-
-            // Sync visual stepper node
-            setStep(stepIdx);
+            if (mainSolidLine) {
+                mainSolidLine.setLatLngs(solidCoords);
+            }
 
             // Override progress fill width dynamically
             const fillEl = document.getElementById('progress-bar-fill');
@@ -1324,8 +1395,6 @@
             }
 
             // 2. Dynamic Complete Hydro-Journey Log Items (0 to 6)
-            // Required minimum step index for each log item to be started/completed
-            const logMinStep = [0, 1, 1, 2, 2, 3, 3];
 
             // Calculate real-time dynamic timestamps for each milestone
             const baseMs = (activeFlushData && activeFlushData.timestamp) ? Number(activeFlushData.timestamp) : (Date.now() - 15 * 60 * 1000);
@@ -1342,22 +1411,26 @@
                 return `${dateStr}, ${timeStr}`;
             }
 
-            const t0 = baseMs;                      // Flush timestamp (0 min)
-            const t1 = baseMs + 2 * 60 * 1000;       // Street main (2 min)
-            const t2 = baseMs + 8 * 60 * 1000;       // Trunk line (8 min)
-            const t3 = baseMs + 15 * 60 * 1000;      // SEP Arrival (15 min)
-            const t4 = baseMs + 15 * 60 * 1000;      // Primary Clarification & Digestion (15 min)
-            const t5 = baseMs + 24 * 3600 * 1000;    // Sodium Hypochlorite Disinfection (24 hr)
-            const t6 = baseMs + 24.25 * 3600 * 1000; // Deepwater Outfall Discharge (24.25 hr)
+            const t0 = baseMs;                                                            // Flush timestamp
+            const t1 = baseMs + LATERAL_SEC * 1000;                                       // Enters street main (~2 min)
+            const t2 = baseMs + (LATERAL_SEC + (SEP_ARRIVAL_SEC - LATERAL_SEC) / 2) * 1000; // Mid trunk line (~18 min)
+            const t3 = baseMs + SEP_ARRIVAL_SEC * 1000;                                   // SEP Arrival (~35 min at 8 ft/s)
+            const t4 = baseMs + SEP_ARRIVAL_SEC * 1000;                                   // Primary Clarification & Digestion
+            const t5 = baseMs + (SEP_ARRIVAL_SEC + TREATMENT_SEC) * 1000;                 // Disinfection complete (24 hr)
+            const t6 = baseMs + (SEP_ARRIVAL_SEC + TREATMENT_SEC + 900) * 1000;           // Deepwater Outfall Discharge
+
+            // Each milestone goes dark only once its own timestamp has passed
+            const nowMs = Date.now();
+            const milestoneMs = [t0, t1, t2, t3, t4, t5, t6];
 
             const logTimes = [
                 formatLogTime(t0),
-                stepIndex >= 1 ? formatLogTime(t1) : `Est. ${formatLogTime(t1)}`,
-                stepIndex >= 1 ? formatLogTime(t2) : `Est. ${formatLogTime(t2)}`,
-                stepIndex >= 2 ? `${formatLogTime(t3)} (15 Min Transit)` : `Est. ${formatLogTime(t3)} (15 Min Transit)`,
-                stepIndex >= 2 ? (stepIndex === 3 ? `Completed ${formatLogDateAndTime(t4)}` : `IN PROGRESS (Started ${formatLogTime(t4)})`) : `Pending (~15m Mark)`,
-                stepIndex >= 2 ? (stepIndex === 3 ? `Completed ${formatLogDateAndTime(t5)}` : `Pending (${formatLogDateAndTime(t5)})`) : `Pending (${formatLogDateAndTime(t5)})`,
-                stepIndex >= 3 ? `Discharged ${formatLogDateAndTime(t6)}` : `Pending (Est. ${formatLogDateAndTime(t6)})`
+                nowMs >= t1 ? formatLogTime(t1) : `Est. ${formatLogTime(t1)}`,
+                nowMs >= t2 ? formatLogTime(t2) : `Est. ${formatLogTime(t2)}`,
+                nowMs >= t3 ? `${formatLogTime(t3)} (35 Min Transit)` : `Est. ${formatLogTime(t3)} (35 Min Transit)`,
+                nowMs >= t4 ? (nowMs >= t5 ? `Completed ${formatLogDateAndTime(t4)}` : `IN PROGRESS (Started ${formatLogTime(t4)})`) : `Pending (~35m Mark)`,
+                nowMs >= t5 ? `Completed ${formatLogDateAndTime(t5)}` : `Pending (${formatLogDateAndTime(t5)})`,
+                nowMs >= t6 ? `Discharged ${formatLogDateAndTime(t6)}` : `Pending (Est. ${formatLogDateAndTime(t6)})`
             ];
 
             for (let j = 0; j < 7; j++) {
@@ -1373,7 +1446,7 @@
 
                 if (!itemEl || !dotEl) continue;
 
-                const isStartedOrCompleted = (stepIndex >= logMinStep[j]);
+                const isStartedOrCompleted = (nowMs >= milestoneMs[j]);
 
                 if (isStartedOrCompleted) {
                     // Started/Completed log item: Full opacity, dark text, active blue dot
@@ -1415,6 +1488,9 @@
             document.getElementById('sim-status-badge').textContent = 'READY';
             document.getElementById('sim-status-badge').className = 'bg-amber-100 text-amber-800 text-[10px] px-2.5 py-1 rounded font-mono font-bold';
 
+            if (simAnimFrame) cancelAnimationFrame(simAnimFrame);
+            simAnimFrame = null;
+            simLastCoordIdx = 0;
             if (simSolidLine) simSolidLine.setLatLngs([]);
             if (simFlushMarker && sewerPathCoordinates) simFlushMarker.setLatLng(sewerPathCoordinates[0]);
             updateUnstartedSimUI();
@@ -1448,6 +1524,40 @@
             }
         }
 
+        // Animated crawl of the simulator's solid line & marker between waypoints
+        let simAnimFrame = null;
+        let simLastCoordIdx = 0;
+
+        function animateSimPath(fromCoordIdx, toCoordIdx, duration) {
+            if (simAnimFrame) cancelAnimationFrame(simAnimFrame);
+
+            if (toCoordIdx <= fromCoordIdx) {
+                // Backward jump or no movement: snap instantly
+                simSolidLine.setLatLngs(sewerPathCoordinates.slice(0, toCoordIdx + 1));
+                simFlushMarker.setLatLng(sewerPathCoordinates[toCoordIdx]);
+                return;
+            }
+
+            const segment = sewerPathCoordinates.slice(fromCoordIdx, toCoordIdx + 1);
+            const prefix = sewerPathCoordinates.slice(0, fromCoordIdx + 1);
+            const startTime = performance.now();
+
+            function frame(now) {
+                const t = Math.min(1, (now - startTime) / duration);
+                // Ease in-out for a natural crawl
+                const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+                const coords = prefix.concat(pathUpTo(segment, eased).slice(1));
+                simSolidLine.setLatLngs(coords);
+                simFlushMarker.setLatLng(coords[coords.length - 1]);
+                if (t < 1) {
+                    simAnimFrame = requestAnimationFrame(frame);
+                } else {
+                    simAnimFrame = null;
+                }
+            }
+            simAnimFrame = requestAnimationFrame(frame);
+        }
+
         // Update Simulator Map & Text Box
         function setSimStep(stepIndex) {
             hasSimStarted = true;
@@ -1462,9 +1572,9 @@
             const coordIdx = data.coordsIndex;
             const targetCoords = sewerPathCoordinates[coordIdx];
 
-            // Update solid path on simulator map
-            simSolidLine.setLatLngs(sewerPathCoordinates.slice(0, coordIdx + 1));
-            simFlushMarker.setLatLng(targetCoords);
+            // Crawl the solid path & marker to the new waypoint (accelerated time)
+            animateSimPath(simLastCoordIdx, coordIdx, 1700);
+            simLastCoordIdx = coordIdx;
             simMap.panTo(targetCoords);
 
             const simEmojiEl = document.getElementById('sim-map-emoji');
