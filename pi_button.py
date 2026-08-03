@@ -31,6 +31,7 @@ FIREBASE_PROJECT_ID = "flushbase"  # Replace with your Firebase Project ID
 PUBLIC_HOST_URL = "https://flushbase.web.app" # Replace with your deployed app URL (or http://<pi-ip>:8000)
 BUTTON_GPIO_PIN = 17 # GPIO pin connected to button (active low with internal pull-up)
 FLUSH_COOLDOWN_SECONDS = 5 # Minimum seconds between flushes (guards against bouncy/miswired buttons)
+RECEIPT_WIDTH = 30 # Receipt text width in characters (58mm printers typically fit 30-32 at Font A)
 
 def is_pi_hardware():
     """Detects Raspberry Pi hardware from system device tree or cpuinfo."""
@@ -220,18 +221,22 @@ def get_next_customer_number():
     return count
 
 def print_receipt(flush_id, formatted_time, tracking_url, qr_filename=None):
-    """Formats and prints an ESC/POS styled thermal receipt for 58mm paper (28 columns max)"""
+    """Formats and prints an ESC/POS styled thermal receipt for 58mm paper (RECEIPT_WIDTH columns)"""
     customer_num = get_next_customer_number()
-    divider = "=" * 28
-    dash_line = "-" * 28
+    width = RECEIPT_WIDTH
+    divider = "=" * width
+    dash_line = "-" * width
+
+    def center(text):
+        return text.center(width).rstrip()
 
     toilet_png = os.path.join(os.path.dirname(__file__), "toilet.png")
     greeting_text = "Thank you, come again!\n\n"
 
     header_text = f"""
 {divider}
- FIDGET CAMP FLUSH TRACKER
-1417 15th St -> Pier 80
+{center("FIDGET CAMP PUSH NOTIFICATION")}
+{center("1417 15th St -> Pier 80")}
 {divider}
 ID:       {flush_id}
 DATE:     {formatted_time}
@@ -243,14 +248,14 @@ SCAN QR CODE TO TRACK LIVE:
 """
 
     footer_text = f"""
-  https://flushbase.web.app
-  /flushtracker.html?id=
-       {flush_id}
+{center("https://flushbase.web.app")}
+{center("/flushtracker.html?id=")}
+{center(flush_id)}
 {dash_line}
-  Remember: Only Flush 3 P's:
-     Poop, Pee, and Paper!
+{center("Remember: Only Flush 3 P's:")}
+{center("Poop, Pee, and Paper!")}
 {dash_line}
-You are satisfied customer #{customer_num}
+{center(f"You are satisfied customer #{customer_num}")}
 {divider}
 """
     full_receipt_text = "\n    [ TOILET GRAPHIC ]\n   " + greeting_text + header_text + "\n [ QR CODE GRAPHIC ]\n" + footer_text

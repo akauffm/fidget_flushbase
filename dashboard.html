@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FlushBase Mission Control - Live Flush Dashboard</title>
+    <title>Push Notification Mission Control - Live Flush Dashboard</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -39,17 +39,41 @@
     <script src="firebase_config.js"></script>
     <style>
         @keyframes flush-arrive {
-            0% { background-color: #fef9c3; transform: translateY(-6px); opacity: 0; }
-            30% { opacity: 1; transform: translateY(0); }
-            100% { background-color: #ffffff; }
+            0% {
+                background-color: #fef9c3;
+                transform: translateY(-6px);
+                opacity: 0;
+            }
+
+            30% {
+                opacity: 1;
+                transform: translateY(0);
+            }
+
+            100% {
+                background-color: #ffffff;
+            }
         }
-        .flush-arrive { animation: flush-arrive 2.5s ease-out; }
+
+        .flush-arrive {
+            animation: flush-arrive 2.5s ease-out;
+        }
 
         @keyframes pulse-dot {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.35; }
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.35;
+            }
         }
-        .pulse-dot { animation: pulse-dot 1.6s ease-in-out infinite; }
+
+        .pulse-dot {
+            animation: pulse-dot 1.6s ease-in-out infinite;
+        }
     </style>
 </head>
 
@@ -62,15 +86,19 @@
                 <div class="flex items-center gap-3">
                     <img src="toilet.png" alt="FlushBase logo" class="h-8 w-8 invert">
                     <div>
-                        <h1 class="text-base sm:text-lg font-extrabold tracking-tight leading-tight">FlushBase Mission Control</h1>
-                        <p class="text-[11px] text-gray-300 leading-tight">Live flush telemetry · 1417 15th St → SF Bay</p>
+                        <h1 class="text-base sm:text-lg font-extrabold tracking-tight leading-tight">Push Notification
+                            Mission Control</h1>
+                        <p class="text-[11px] text-gray-300 leading-tight">Live flush telemetry · 1417 15th St → SF Bay
+                        </p>
                     </div>
                 </div>
                 <div class="flex items-center gap-3">
-                    <span id="live-badge" class="hidden items-center gap-1.5 text-[11px] font-mono font-bold bg-emerald-900/60 text-emerald-300 px-2.5 py-1 rounded border border-emerald-700">
+                    <span id="live-badge"
+                        class="hidden items-center gap-1.5 text-[11px] font-mono font-bold bg-emerald-900/60 text-emerald-300 px-2.5 py-1 rounded border border-emerald-700">
                         <span class="w-2 h-2 rounded-full bg-emerald-400 pulse-dot inline-block"></span> LIVE
                     </span>
-                    <a href="flushtracker.html" class="text-[11px] sm:text-xs text-gray-300 hover:text-white underline underline-offset-2">
+                    <a href="flushtracker.html"
+                        class="text-[11px] sm:text-xs text-gray-300 hover:text-white underline underline-offset-2">
                         <i class="fa-solid fa-magnifying-glass-location mr-1"></i>Tracker
                     </a>
                 </div>
@@ -101,10 +129,13 @@
         </section>
 
         <!-- Notifications opt-in -->
-        <section class="bg-white rounded-xl p-4 border border-gray-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <section
+            class="bg-white rounded-xl p-4 border border-gray-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
-                <h2 class="text-sm font-bold text-gray-900"><i class="fa-solid fa-bell text-amazon-orange mr-1.5"></i>Flush Notifications</h2>
-                <p id="notify-desc" class="text-xs text-gray-500 mt-0.5">Get a browser notification the moment someone flushes. Works while this page is open (even in a background tab).</p>
+                <h2 class="text-sm font-bold text-gray-900"><i
+                        class="fa-solid fa-bell text-amazon-orange mr-1.5"></i>Flush Notifications</h2>
+                <p id="notify-desc" class="text-xs text-gray-500 mt-0.5">Get a browser notification the moment someone
+                    flushes. Works while this page is open (even in a background tab).</p>
             </div>
             <button id="notify-btn" onclick="toggleNotifications()"
                 class="shrink-0 bg-amazon-yellow hover:bg-amazon-yellowHover text-gray-900 text-sm font-semibold px-4 py-2 rounded-lg shadow-sm border border-yellow-500/40">
@@ -126,7 +157,8 @@
             <ul id="feed-list" class="divide-y divide-gray-100"></ul>
         </section>
 
-        <p class="text-center text-[11px] text-gray-400">FlushBase Mission Control · 2026 Fidget Camp Showcase</p>
+        <p class="text-center text-[11px] text-gray-400">Push Notification Mission Control · 2026 Fidget Camp Showcase
+        </p>
     </main>
 
     <script>
@@ -174,7 +206,7 @@
             Notification.requestPermission().then((perm) => {
                 if (perm === 'granted') {
                     localStorage.setItem('flushNotify', 'on');
-                    new Notification('FlushBase notifications enabled 🚽', {
+                    new Notification('Push Notifications enabled 🚽', {
                         body: 'You’ll be notified the moment a flush happens.',
                         icon: 'toilet.png'
                     });
