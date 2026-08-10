@@ -13,8 +13,10 @@ Live Dashboard: **[https://flushbase.web.app/dashboard.html](https://flushbase.w
 
 ```
 [Button on GPIO 17] → pi_button.py (systemd service on the Pi)
+                          ├─→ logs every flush to local_flushes.json on the Pi
                           ├─→ writes flush doc to Firestore ("flushes" collection)
-                          ├─→ falls back to local_flushes.json if Firebase unconfigured
+                          │     └─ on failure: queues in pending_flushes.json,
+                          │        marks the receipt OFFLINE, retries later
                           └─→ prints ESC/POS receipt + QR to /dev/usb/lp0
 
 [Visitor scans QR] → flushtracker.html?id=FLUSH-XXXXXX
@@ -34,7 +36,8 @@ Live Dashboard: **[https://flushbase.web.app/dashboard.html](https://flushbase.w
 | `public/` | What Firebase Hosting actually deploys (see sync rule below) |
 | `firebase_config.js` | Firebase web credentials (shared by both pages) |
 | `firestore.rules` | Public read/create, no update/delete (flush records are immutable) |
-| `local_flushes.json` | Local fallback DB when Firebase isn't configured |
+| `local_flushes.json` | On-Pi log of every flush, written whether or not Firebase is reachable |
+| `pending_flushes.json` | Queue of flushes that haven't reached Firestore yet (auto-drains) |
 | `receipt_counter.json` | Persistent "satisfied customer #N" counter (lives on the Pi) |
 
 > **⚠️ Sync rule:** `public/index.html` is a *copy* of `flushtracker.html`, and
@@ -181,6 +184,27 @@ ssh admin@pi3.local sudo systemctl restart flushtracker
 
 ---
 
+## 📡 What Happens When the Wi-Fi Drops
+
+Every flush is written to `local_flushes.json` on the Pi first, so the device
+always holds a complete log. The Firestore write is then attempted
+`FIRESTORE_ATTEMPTS` times (2) with a `FIRESTORE_TIMEOUT_SECONDS` (4s) timeout —
+short on purpose, because the button callback is synchronous and every second
+spent retrying delays the receipt.
+
+- **Write succeeds** → normal receipt; the QR code resolves immediately.
+- **Write fails** → the flush is appended to `pending_flushes.json` and the
+  receipt prints an extra `!! OFFLINE - NOT YET SYNCED !!` block, so the visitor
+  knows the tracking page won't work yet rather than scanning a dead link.
+- **Next successful flush** → the queue drains automatically *after* that
+  receipt prints, one attempt per entry. Backlog is capped at
+  `PENDING_QUEUE_LIMIT` (50); beyond that the oldest entries are dropped.
+
+A 4xx from Firestore (bad payload, or a security-rules rejection) is treated as
+permanent and is *not* retried — only network errors and 5xx are.
+
+---
+
 ## 🖨️ Receipt Tuning (top of `pi_button.py`)
 
 | Constant | Meaning |
@@ -240,6 +264,8 @@ account needed).
 | Button fires on release instead of press | Expected with normally-closed wiring — the auto-detect handles it; check the "Button wiring detected" journal line |
 | Receipt prints a solid black square instead of logo | `toilet.png` lost its transparency handling — the converter flattens alpha onto white; make sure you deployed the current `pi_button.py` |
 | Web changes don't show up after deploy | You edited `flushtracker.html`/`dashboard.html` but didn't copy into `public/` before `firebase deploy` |
+| Receipt prints `!! OFFLINE - NOT YET SYNCED !!` | The Pi couldn't reach Firestore. The flush is safe in `pending_flushes.json` and uploads after the next successful flush — check the Pi's network |
+| Journal shows `Firestore rejected ...: HTTP 40x` | Not a network problem — the write violated `firestore.rules` or the payload is malformed. Not retried by design |
 
 ---
 

@@ -2,6 +2,7 @@ venv/
 node_modules/
 .DS_Store
 local_flushes.json
+pending_flushes.json
 qr_*.png
 last_receipt.txt
 receipt_counter.json

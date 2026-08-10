@@ -33,6 +33,17 @@ BUTTON_GPIO_PIN = 17 # GPIO pin connected to button (active low with internal pu
 FLUSH_COOLDOWN_SECONDS = 5 # Minimum seconds between flushes (guards against bouncy/miswired buttons)
 RECEIPT_WIDTH = 30 # Receipt text width in characters (58mm printers typically fit 30-32 at Font A)
 
+# Network behaviour. Both numbers are deliberately small: the button callback is
+# synchronous, so every second spent retrying is a second the receipt is not printing.
+FIRESTORE_TIMEOUT_SECONDS = 4 # Per-attempt HTTP timeout
+FIRESTORE_ATTEMPTS = 2        # Attempts before giving up and queueing the flush locally
+PENDING_QUEUE_LIMIT = 50      # Max queued flushes to re-send after connectivity returns
+
+# Fixed fields on every flush record (the button cannot sense what was flushed)
+FLUSH_GPF = 1.6
+FLUSH_WASTE_TYPE = "unknown"
+FLUSH_ORIGIN = "1417 15th St, San Francisco, CA"
+
 def is_pi_hardware():
     """Detects Raspberry Pi hardware from system device tree or cpuinfo."""
     if os.path.exists('/proc/device-tree/model') or os.path.exists('/sys/firmware/devicetree/base/model'):
@@ -57,58 +68,157 @@ def generate_flush_id():
     hex_code = ''.join(random.choices('0123456789ABCDEF', k=6))
     return f"FLUSH-{hex_code}"
 
-def save_to_firestore(flush_id, timestamp_ms, formatted_time):
-    """Writes flush document to Firebase Cloud Firestore via HTTP REST API"""
-    if FIREBASE_PROJECT_ID == "YOUR_PROJECT_ID":
-        print(" [NOTE] Firebase Project ID not configured yet. Saving flush locally to local_flushes.json.")
-        local_db_path = os.path.join(os.path.dirname(__file__), "local_flushes.json")
-        flushes = {}
-        if os.path.exists(local_db_path):
-            try:
-                with open(local_db_path, 'r') as f:
-                    flushes = json.load(f)
-            except Exception:
-                pass
-        flushes[flush_id] = {
-            "id": flush_id,
-            "timestamp": timestamp_ms,
-            "formatted_time": formatted_time,
-            "gpf": 1.6,
-            "waste_type": "unknown",
-            "origin": "1417 15th St, San Francisco, CA"
-        }
-        with open(local_db_path, 'w') as f:
-            json.dump(flushes, f, indent=2)
-        return True
+def data_path(filename):
+    """Absolute path to a data file next to this script (works from any cwd)."""
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
 
-    # Firestore REST API endpoint
-    url = f"https://firestore.googleapis.com/v1/projects/{FIREBASE_PROJECT_ID}/databases/(default)/documents/flushes/{flush_id}"
-    payload = {
+
+def read_json(path, default):
+    """Reads a JSON file, returning `default` if it is missing or corrupt."""
+    if not os.path.exists(path):
+        return default
+    try:
+        with open(path, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f" [!] Could not read {os.path.basename(path)} ({e}); starting fresh.")
+        return default
+
+
+def write_json(path, data):
+    """Writes a JSON file, reporting rather than raising on failure."""
+    try:
+        with open(path, 'w') as f:
+            json.dump(data, f, indent=2)
+        return True
+    except Exception as e:
+        print(f" [!] Could not write {os.path.basename(path)}: {e}")
+        return False
+
+
+def build_flush_record(flush_id, timestamp_ms, formatted_time):
+    """The canonical flush record — one shape for Firestore, the local log and the queue."""
+    return {
+        "id": flush_id,
+        "timestamp": timestamp_ms,
+        "formatted_time": formatted_time,
+        "gpf": FLUSH_GPF,
+        "waste_type": FLUSH_WASTE_TYPE,
+        "origin": FLUSH_ORIGIN,
+    }
+
+
+def firestore_payload(record):
+    """Maps a flush record onto the Firestore REST API's typed-value format."""
+    return {
         "fields": {
-            "timestamp": {"integerValue": str(timestamp_ms)},
-            "formatted_time": {"stringValue": formatted_time},
-            "gpf": {"doubleValue": 1.6},
-            "waste_type": {"stringValue": "unknown"},
-            "origin": {"stringValue": "1417 15th St, San Francisco, CA"}
+            "timestamp": {"integerValue": str(record["timestamp"])},
+            "formatted_time": {"stringValue": record["formatted_time"]},
+            "gpf": {"doubleValue": record["gpf"]},
+            "waste_type": {"stringValue": record["waste_type"]},
+            "origin": {"stringValue": record["origin"]},
         }
     }
-    
-    try:
-        response = requests.patch(url, json=payload, timeout=5)
-        if response.status_code in (200, 201):
-            print(f" Successfully committed {flush_id} to Cloud Firestore!")
-            return True
-        else:
-            print(f" Firestore HTTP Error {response.status_code}: {response.text}")
-            return False
-    except Exception as e:
-        print(f" Error connecting to Firestore API: {e}")
+
+
+def push_to_firestore(record, attempts=FIRESTORE_ATTEMPTS, verbose=True):
+    """Writes one flush document to Cloud Firestore via the REST API. Returns True on success."""
+    if FIREBASE_PROJECT_ID == "YOUR_PROJECT_ID":
+        if verbose:
+            print(" [NOTE] Firebase Project ID not configured — keeping this flush on the Pi only.")
         return False
+
+    flush_id = record["id"]
+    url = (f"https://firestore.googleapis.com/v1/projects/{FIREBASE_PROJECT_ID}"
+           f"/databases/(default)/documents/flushes/{flush_id}")
+
+    for attempt in range(1, attempts + 1):
+        try:
+            response = requests.patch(url, json=firestore_payload(record),
+                                      timeout=FIRESTORE_TIMEOUT_SECONDS)
+            if response.status_code in (200, 201):
+                if verbose:
+                    print(f" Successfully committed {flush_id} to Cloud Firestore!")
+                return True
+            # 4xx responses are deterministic (bad payload, rules rejection) — retrying won't help.
+            if 400 <= response.status_code < 500:
+                print(f" Firestore rejected {flush_id}: HTTP {response.status_code} {response.text}")
+                return False
+            print(f" Firestore HTTP Error {response.status_code} (attempt {attempt}/{attempts})")
+        except Exception as e:
+            print(f" Error connecting to Firestore API (attempt {attempt}/{attempts}): {e}")
+        if attempt < attempts:
+            time.sleep(0.5)
+    return False
+
+
+def save_to_local_log(record):
+    """Mirrors every flush into local_flushes.json so the Pi keeps a complete record."""
+    path = data_path("local_flushes.json")
+    flushes = read_json(path, {})
+    if not isinstance(flushes, dict):
+        flushes = {}
+    flushes[record["id"]] = record
+    write_json(path, flushes)
+
+
+def queue_pending(record):
+    """Adds an unsynced flush to the re-send queue (newest entries win if it overflows)."""
+    path = data_path("pending_flushes.json")
+    pending = read_json(path, [])
+    if not isinstance(pending, list):
+        pending = []
+    pending.append(record)
+    if len(pending) > PENDING_QUEUE_LIMIT:
+        dropped = len(pending) - PENDING_QUEUE_LIMIT
+        pending = pending[-PENDING_QUEUE_LIMIT:]
+        print(f" [!] Pending queue full — dropped {dropped} oldest unsynced flush(es).")
+    write_json(path, pending)
+    print(f" [~] {record['id']} queued for upload ({len(pending)} awaiting network).")
+
+
+def drain_pending_queue():
+    """Best-effort re-send of previously queued flushes. Call AFTER printing the receipt."""
+    path = data_path("pending_flushes.json")
+    pending = read_json(path, [])
+    if not isinstance(pending, list) or not pending:
+        return
+
+    print(f" [~] Retrying {len(pending)} queued flush(es)...")
+    still_pending = []
+    for record in pending:
+        # One attempt each: if the network is still down, fail fast rather than
+        # blocking the button for the length of the whole backlog.
+        if not push_to_firestore(record, attempts=1, verbose=False):
+            still_pending.append(record)
+
+    synced = len(pending) - len(still_pending)
+    if synced:
+        print(f" [✓] Uploaded {synced} previously queued flush(es).")
+    if still_pending:
+        write_json(path, still_pending)
+    elif os.path.exists(path):
+        try:
+            os.remove(path)
+        except Exception:
+            write_json(path, [])
+
+
+def save_flush(record):
+    """Persists a flush: always to the local log, to Firestore if reachable, queued if not.
+
+    Returns True when the record reached Firestore, so the receipt can tell the
+    visitor whether their tracking QR code will actually resolve.
+    """
+    save_to_local_log(record)
+    if push_to_firestore(record):
+        return True
+    queue_pending(record)
+    return False
 
 def generate_qr_code(tracking_url, flush_id):
     """Generates a QR code image and terminal ASCII preview"""
-    output_dir = os.path.dirname(__file__)
-    qr_filename = os.path.join(output_dir, f"qr_{flush_id}.png")
+    qr_filename = data_path(f"qr_{flush_id}.png")
 
     if QRCODE_AVAILABLE:
         qr = qrcode.QRCode(
@@ -203,7 +313,7 @@ def generate_escpos_native_qr(url):
 
 def get_next_customer_number():
     """Reads, increments, and persists the local receipt counter."""
-    counter_file = os.path.join(os.path.dirname(__file__), "receipt_counter.json")
+    counter_file = data_path("receipt_counter.json")
     count = 0
     if os.path.exists(counter_file):
         try:
@@ -220,8 +330,12 @@ def get_next_customer_number():
         print(f" [!] Could not save receipt counter: {e}")
     return count
 
-def print_receipt(flush_id, formatted_time, tracking_url, qr_filename=None):
-    """Formats and prints an ESC/POS styled thermal receipt for 58mm paper (RECEIPT_WIDTH columns)"""
+def print_receipt(flush_id, formatted_time, tracking_url, qr_filename=None, synced=True):
+    """Formats and prints an ESC/POS styled thermal receipt for 58mm paper (RECEIPT_WIDTH columns)
+
+    `synced` reflects whether the flush reached Firestore. When it did not, the
+    receipt says so — the QR code will not resolve until the Pi is back online.
+    """
     customer_num = get_next_customer_number()
     width = RECEIPT_WIDTH
     divider = "=" * width
@@ -230,7 +344,7 @@ def print_receipt(flush_id, formatted_time, tracking_url, qr_filename=None):
     def center(text):
         return text.center(width).rstrip()
 
-    toilet_png = os.path.join(os.path.dirname(__file__), "toilet.png")
+    toilet_png = data_path("toilet.png")
     greeting_text = "Thank you, come again!\n\n"
 
     header_text = f"""
@@ -247,11 +361,17 @@ DEST:     Pier 80 Outfall
 SCAN QR CODE TO TRACK LIVE:
 """
 
+    sync_notice = "" if synced else f"""{dash_line}
+{center("!! OFFLINE - NOT YET SYNCED !!")}
+{center("Saved on the device; it will")}
+{center("upload when back online.")}
+"""
+
     footer_text = f"""
-{center("https://flushbase.web.app")}
+{center(PUBLIC_HOST_URL.rstrip('/'))}
 {center("/flushtracker.html?id=")}
 {center(flush_id)}
-{dash_line}
+{sync_notice}{dash_line}
 {center("Remember: Only Flush 3 P's:")}
 {center("Poop, Pee, and Paper!")}
 {dash_line}
@@ -261,10 +381,12 @@ SCAN QR CODE TO TRACK LIVE:
     full_receipt_text = "\n    [ TOILET GRAPHIC ]\n   " + greeting_text + header_text + "\n [ QR CODE GRAPHIC ]\n" + footer_text
     print(full_receipt_text)
     
-    # Save receipt copy
-    receipt_file = os.path.join(os.path.dirname(__file__), "last_receipt.txt")
-    with open(receipt_file, 'w') as f:
-        f.write(full_receipt_text)
+    # Save receipt copy (never let a read-only filesystem stop the actual printing)
+    try:
+        with open(data_path("last_receipt.txt"), 'w') as f:
+            f.write(full_receipt_text)
+    except Exception as e:
+        print(f" [!] Could not save last_receipt.txt: {e}")
 
     # Send raw ESC/POS bytes to connected USB thermal receipt printer (/dev/usb/lp0)
     if os.path.exists("/dev/usb/lp0"):
@@ -303,11 +425,12 @@ SCAN QR CODE TO TRACK LIVE:
             print(" Printed thermal receipt with QR Code graphic to /dev/usb/lp0!")
         except PermissionError:
             print(" [!] Permission denied accessing /dev/usb/lp0!")
-            print("     To fix permission, run this command in terminal:")
-            print("     sudo chmod 666 /dev/usb/lp0   (or: sudo usermod -a -G lp $USER)")
+            print("     Add your user to the 'lp' group, then restart the service:")
+            print("     sudo usermod -a -G lp $USER")
+            print("     (Avoid 'chmod 666' — it resets when the printer re-enumerates.)")
             # Attempt CUPS fallback
             try:
-                raw_bin = os.path.join(os.path.dirname(__file__), "last_receipt.bin")
+                raw_bin = data_path("last_receipt.bin")
                 with open(raw_bin, "wb") as f:
                     f.write(raw_bytes)
                 res = subprocess.run(["lpr", "-o", "raw", raw_bin], capture_output=True)
@@ -333,24 +456,29 @@ def trigger_flush_event():
     base_url = PUBLIC_HOST_URL.rstrip('/')
     tracking_url = f"{base_url}/flushtracker.html?id={flush_id}"
 
-    # 1. Save to online Cloud Firestore
-    save_to_firestore(flush_id, timestamp_ms, formatted_time)
+    # 1. Persist the flush (local log always; Firestore if reachable, queued if not)
+    record = build_flush_record(flush_id, timestamp_ms, formatted_time)
+    synced = save_flush(record)
 
     # 2. Generate QR code
     qr_filename = generate_qr_code(tracking_url, flush_id)
 
     # 3. Print thermal receipt and cleanup temporary files
     try:
-        print_receipt(flush_id, formatted_time, tracking_url, qr_filename)
+        print_receipt(flush_id, formatted_time, tracking_url, qr_filename, synced=synced)
     finally:
         try:
             if qr_filename and os.path.exists(qr_filename):
                 os.remove(qr_filename)
-            raw_bin = os.path.join(os.path.dirname(__file__), "last_receipt.bin")
+            raw_bin = data_path("last_receipt.bin")
             if os.path.exists(raw_bin):
                 os.remove(raw_bin)
         except Exception:
             pass
+
+    # 4. Now that the visitor has their receipt, catch up on anything queued earlier.
+    if synced:
+        drain_pending_queue()
 
 def create_button(pin_num, bounce_time):
     """Creates a gpiozero Button, or exits with install instructions if no GPIO backend is available."""
