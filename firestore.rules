@@ -3,11 +3,58 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     // FlushTracker Flushes collection rules
+    //
+    // The Pi writes over the plain Firestore REST API with no service account,
+    // so creation has to stay unauthenticated. That means the endpoint is open
+    // to the whole internet and these rules are the ONLY thing standing between
+    // a stranger and the live dashboard. Constrain the shape of what can land.
     match /flushes/{flushId} {
-      // Allow public read & creation of flush records
+
+      // Exactly the fields pi_button.py writes -- nothing more, nothing less
+      function hasExactFields() {
+        return request.resource.data.keys().hasOnly(
+                 ['timestamp', 'formatted_time', 'gpf', 'waste_type', 'origin'])
+            && request.resource.data.keys().hasAll(
+                 ['timestamp', 'formatted_time', 'gpf', 'waste_type', 'origin']);
+      }
+
+      function hasValidValues() {
+        return request.resource.data.timestamp is int
+            // Not before the showcase was built, and not claiming to be from the
+            // future beyond a little clock skew -- keeps the feed ordered honestly
+            && request.resource.data.timestamp > 1750000000000
+            && request.resource.data.timestamp < request.time.toMillis() + 300000
+            // Deliberately a character class rather than a strict date pattern:
+            // strftime output shifts with the Pi's locale, and rejecting a real
+            // flush is worse than accepting an oddly formatted date. It still
+            // excludes < > & " ' ( ) = , so no markup or script can get through.
+            && request.resource.data.formatted_time is string
+            && request.resource.data.formatted_time.size() <= 64
+            && request.resource.data.formatted_time.matches('^[A-Za-z0-9 ,:.-]+$')
+            && request.resource.data.gpf is number
+            && request.resource.data.gpf > 0
+            && request.resource.data.gpf <= 10
+            && request.resource.data.waste_type in ['unknown', 'liquid', 'solid']
+            && request.resource.data.origin is string
+            && request.resource.data.origin.size() <= 128
+            && request.resource.data.origin.matches('^[A-Za-z0-9 ,:.#-]+$');
+      }
+
+      // Anyone can follow a flush
       allow read: if true;
-      allow create: if true;
+
+      // Anyone can create one, but only in the exact shape the button produces,
+      // and only under an ID matching generate_flush_id() in pi_button.py
+      allow create: if flushId.matches('^FLUSH-[0-9A-F]{6}$')
+                    && hasExactFields()
+                    && hasValidValues();
+
       allow update, delete: if false; // Immutability for tracking logs
+    }
+
+    // Nothing else in the database is publicly writable
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
