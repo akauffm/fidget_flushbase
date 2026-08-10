@@ -1,5 +1,11 @@
 {
-  "dependencies": {
-    "firebase": "^12.17.0"
+  "name": "fidget-flushbase",
+  "version": "1.0.0",
+  "private": true,
+  "description": "FlushTracker - 2026 Fidget Camp Showcase. Static pages + a Raspberry Pi button listener; no build step.",
+  "scripts": {
+    "sync": "./sync-public.sh",
+    "deploy": "firebase deploy --only hosting",
+    "deploy:rules": "firebase deploy --only firestore:rules"
   }
 }

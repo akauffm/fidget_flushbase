@@ -1,5 +1,8 @@
 {
   "hosting": {
+    "predeploy": [
+      "bash ./sync-public.sh"
+    ],
     "public": "public",
     "ignore": [
       "firebase.json",
