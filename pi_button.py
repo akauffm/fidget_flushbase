@@ -59,7 +59,7 @@ def generate_flush_id():
 
 def save_to_firestore(flush_id, timestamp_ms, formatted_time):
     """Writes flush document to Firebase Cloud Firestore via HTTP REST API"""
-    if FIREBASE_PROJECT_ID == "YOUR_PROJECT_ID":
+    if FIREBASE_PROJECT_ID == "flushbase":
         print(" [NOTE] Firebase Project ID not configured yet. Saving flush locally to local_flushes.json.")
         local_db_path = os.path.join(os.path.dirname(__file__), "local_flushes.json")
         flushes = {}
