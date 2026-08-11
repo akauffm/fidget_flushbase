@@ -34,7 +34,8 @@ Live Dashboard: **[https://flushbase.web.app/dashboard.html](https://flushbase.w
 | `public/` | What Firebase Hosting actually deploys — generated, don't edit by hand |
 | `sync-public.sh` | Copies the source files into `public/`; runs automatically before every deploy |
 | `firebase_config.js` | Firebase web credentials (shared by both pages) |
-| `firestore.rules` | Public read/create, no update/delete (flush records are immutable) |
+| `flush_model.js` | Route geometry + hydraulic timing, shared by both pages (load it *before* the page script) |
+| `firestore.rules` | Public read/create, no update/delete. Creates are validated: ID shape, exact field set, types and ranges |
 | `local_flushes.json` | Local fallback DB when Firebase isn't configured |
 | `receipt_counter.json` | Persistent "satisfied customer #N" counter (lives on the Pi) |
 
@@ -43,6 +44,10 @@ Live Dashboard: **[https://flushbase.web.app/dashboard.html](https://flushbase.w
 > `flushtracker.html`) and `sync-public.sh` refreshes them. It's registered as a
 > hosting `predeploy` hook in `firebase.json`, so a plain
 > ```bash
+> cp flushtracker.html public/index.html
+> cp dashboard.html public/dashboard.html
+> cp flush_model.js public/flush_model.js
+> cp toilet.png public/toilet.png
 > firebase deploy --only hosting
 > ```
 > re-syncs first and can't ship a stale page. Run `./sync-public.sh` yourself if
@@ -210,9 +215,14 @@ Two pages, both talking to the same Firestore `flushes` collection:
   real sewer route in real time. Timing is physics-derived — distances measured
   from the map route, ~2.5 ft/s in the house lateral, **8 ft/s in the mains**
   (≈35 min to SEP), then a 24-hour treatment cycle. Tune via the
-  `MAINS_FT_PER_SEC` constants in the script. Also contains the accelerated
-  liquid/solid simulator. Real flushes are type-agnostic ("1.6 G Flush") since
-  the button only senses the flush.
+  `MAINS_FT_PER_SEC` constants in **`flush_model.js`**. Also contains the
+  accelerated liquid/solid simulator. Real flushes are type-agnostic
+  ("1.6 G Flush") since the button only senses the flush.
+
+  The tracker shows the journey *only* once the record actually loads. An ID
+  that is malformed, unknown, or unreachable gets an explicit "we couldn't find
+  that flush" panel — never a plausible-looking journey for a flush that does
+  not exist.
 - **Dashboard** (`dashboard.html`): live feed of every flush with stats and
   journey stage. "Enable Notifications" uses the browser Notification API —
   fires whenever a flush lands *while the page is open* (background tab OK; no
@@ -229,9 +239,26 @@ for you).
 
 Firestore layout — `flushes/{FLUSH-XXXXXX}`:
 `timestamp` (ms epoch, int) · `formatted_time` (string) · `gpf` (1.6) ·
-`waste_type` ("unknown") · `origin` (string). Rules allow public read/create,
-never update/delete. The Pi writes via the Firestore REST API (no service
-account needed).
+`waste_type` ("unknown") · `origin` (string). The Pi writes via the Firestore
+REST API (no service account needed).
+
+**Creating a flush has to stay unauthenticated** — the Pi has no service
+account — so that endpoint is open to the internet and `firestore.rules` is the
+only thing constraining it. A create is accepted only if the document ID matches
+`^FLUSH-[0-9A-F]{6}$`, the field set is exactly the five fields above with the
+right types, the timestamp is sane, and the string fields contain no markup
+characters. Updates and deletes are refused outright, so flush records stay
+immutable.
+
+Both pages treat everything read back out of Firestore as untrusted and escape
+it before it reaches `innerHTML`.
+
+Rules are wired into `firebase.json`, so deploy them with:
+```bash
+firebase deploy --only firestore:rules
+```
+Hosting and rules deploy separately — `--only hosting` does **not** ship a rules
+change.
 
 ---
 

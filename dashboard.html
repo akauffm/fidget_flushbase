@@ -37,6 +37,8 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
     <script src="firebase_config.js"></script>
+    <!-- Shared hydraulic model (route geometry + timing), also used by flushtracker.html -->
+    <script src="flush_model.js"></script>
     <style>
         @keyframes flush-arrive {
             0% {
@@ -223,7 +225,7 @@
                 tag: flush.id
             });
             n.onclick = () => {
-                window.open(`flushtracker.html?id=${flush.id}`, '_blank');
+                window.open(`flushtracker.html?id=${encodeURIComponent(flush.id)}`, '_blank');
                 n.close();
             };
         }
@@ -237,12 +239,31 @@
             return `${Math.floor(sec / 86400)}d ago`;
         }
 
+        // Badge styling per phase. The phase boundaries themselves come from
+        // flush_model.js, so this page and the tracker can never disagree about
+        // where a given flush is.
+        const STAGE_CLASSES = [
+            'bg-blue-100 text-blue-800 border-blue-200',       // lateral
+            'bg-cyan-100 text-cyan-800 border-cyan-200',       // mains
+            'bg-amber-100 text-amber-800 border-amber-200',    // treatment
+            'bg-emerald-100 text-emerald-800 border-emerald-200' // discharged
+        ];
+
         function journeyStage(ms) {
-            const sec = (Date.now() - ms) / 1000;
-            if (sec < 100) return { label: 'IN LATERAL', cls: 'bg-blue-100 text-blue-800 border-blue-200' };
-            if (sec < 2100) return { label: 'IN TRANSIT', cls: 'bg-cyan-100 text-cyan-800 border-cyan-200' };
-            if (sec < 2100 + 86400) return { label: 'AT SEP PLANT', cls: 'bg-amber-100 text-amber-800 border-amber-200' };
-            return { label: 'DISCHARGED', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200' };
+            const idx = flushPhaseIndex(elapsedSecSince(ms));
+            return { label: FLUSH_PHASES[idx].label, cls: STAGE_CLASSES[idx] };
+        }
+
+        // Anyone can create a document in the flushes collection, so every field
+        // read back out of Firestore is untrusted input. Escape before it goes
+        // anywhere near innerHTML.
+        function esc(value) {
+            return String(value == null ? '' : value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         }
 
         function renderFeed() {
@@ -250,15 +271,17 @@
             const rows = flushDocs.slice(0, MAX_FEED).map((f) => {
                 const stage = journeyStage(f.timestamp);
                 const icon = '🚽';
+                const id = esc(f.id);
+                const gallons = Number(f.gpf) > 0 ? Number(f.gpf) : GPF;
                 return `
-                <li class="px-4 py-3 flex items-center gap-3 ${f._isNew ? 'flush-arrive' : ''}" data-ts="${f.timestamp}">
+                <li class="px-4 py-3 flex items-center gap-3 ${f._isNew ? 'flush-arrive' : ''}" data-ts="${esc(f.timestamp)}">
                     <div class="w-9 h-9 rounded-full bg-amazon-grayBg flex items-center justify-center text-lg shrink-0">${icon}</div>
                     <div class="min-w-0 flex-1">
                         <div class="flex items-center gap-2 flex-wrap">
-                            <a href="flushtracker.html?id=${f.id}" class="font-mono font-bold text-sm text-amazon-blue hover:underline">${f.id}</a>
+                            <a href="flushtracker.html?id=${esc(encodeURIComponent(f.id))}" class="font-mono font-bold text-sm text-amazon-blue hover:underline">${id}</a>
                             <span class="text-[10px] font-bold px-2 py-0.5 rounded-full border ${stage.cls}">${stage.label}</span>
                         </div>
-                        <div class="text-xs text-gray-500 mt-0.5">${f.formatted_time || ''} · ${f.gpf || GPF} G flush</div>
+                        <div class="text-xs text-gray-500 mt-0.5">${esc(f.formatted_time || '')} · ${gallons} G flush</div>
                     </div>
                     <div class="text-xs text-gray-400 font-mono shrink-0 feed-rel">${relativeTime(f.timestamp)}</div>
                 </li>`;
@@ -268,16 +291,72 @@
             flushDocs.forEach(f => f._isNew = false);
         }
 
+        function startOfToday() {
+            const d = new Date();
+            d.setHours(0, 0, 0, 0);
+            return d.getTime();
+        }
+
         function renderStats() {
-            const startOfDay = new Date();
-            startOfDay.setHours(0, 0, 0, 0);
-            const todayFlushes = flushDocs.filter(f => f.timestamp >= startOfDay.getTime());
-            document.getElementById('stat-today').textContent = todayFlushes.length;
-            document.getElementById('stat-gallons').textContent =
-                todayFlushes.reduce((sum, f) => sum + (Number(f.gpf) || GPF), 0).toFixed(1);
-            document.getElementById('stat-total').textContent = flushDocs.length;
+            const dayStart = startOfToday();
+            const loadedToday = flushDocs.filter(f => f.timestamp >= dayStart);
+
+            // The live feed is capped at MAX_FEED, so counting the loaded array
+            // undercounts once more than that many flushes exist. Prefer the
+            // server-side aggregate and only fall back to what is in memory.
+            // Counts taken before midnight no longer describe "today"
+            const todayIsFresh = serverCounts.today !== null && serverCounts.dayStart === dayStart;
+            const todayCount = todayIsFresh ? serverCounts.today : loadedToday.length;
+            const totalCount = (serverCounts.total !== null) ? serverCounts.total : flushDocs.length;
+
+            document.getElementById('stat-today').textContent = todayCount;
+
+            // Exact when today's flushes all fit in the feed; otherwise scaled from
+            // the count, since every flush the button creates is the same volume.
+            const gallons = (loadedToday.length >= todayCount)
+                ? loadedToday.reduce((sum, f) => sum + (Number(f.gpf) || GPF), 0)
+                : todayCount * GPF;
+            document.getElementById('stat-gallons').textContent = gallons.toFixed(1);
+
+            document.getElementById('stat-total').textContent = totalCount;
             document.getElementById('stat-last').textContent =
                 flushDocs.length ? relativeTime(flushDocs[0].timestamp) : 'None yet';
+        }
+
+        // --- Server-side counts (the feed is windowed; these are not) ---
+        const serverCounts = { total: null, today: null, dayStart: null };
+
+        // Uses Firestore's count() aggregation when the SDK supports it, falling
+        // back to a plain read. Returns null if neither works, so renderStats can
+        // fall back to the in-memory length rather than showing a wrong number.
+        async function runCount(query) {
+            try {
+                if (typeof query.count === 'function') {
+                    const snap = await query.count().get();
+                    const value = snap.data().count;
+                    if (typeof value === 'number') return value;
+                }
+            } catch (e) {
+                console.warn('count() aggregation unavailable, falling back to a full read:', e);
+            }
+            try {
+                return (await query.get()).size;
+            } catch (e) {
+                console.warn('Could not count flushes:', e);
+                return null;
+            }
+        }
+
+        async function refreshServerCounts(db) {
+            const dayStart = startOfToday();
+            const [total, today] = await Promise.all([
+                runCount(db.collection('flushes')),
+                runCount(db.collection('flushes').where('timestamp', '>=', dayStart))
+            ]);
+            serverCounts.total = total;
+            serverCounts.today = today;
+            serverCounts.dayStart = dayStart;
+            renderStats();
         }
 
         // Refresh relative timestamps & stage badges without waiting for new data
@@ -327,9 +406,10 @@
                     document.getElementById('live-badge').classList.add('inline-flex');
                     renderFeed();
                     renderStats();
+                    refreshServerCounts(db);
                 }, (err) => {
                     console.error('Firestore listener error:', err);
-                    statusEl.innerHTML = `<i class="fa-solid fa-triangle-exclamation mr-2"></i>Connection error: ${err.message}`;
+                    statusEl.innerHTML = `<i class="fa-solid fa-triangle-exclamation mr-2"></i>Connection error: ${esc(err.message)}`;
                     document.getElementById('live-badge').classList.add('hidden');
                 });
         }
