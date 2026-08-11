@@ -225,7 +225,7 @@
                 tag: flush.id
             });
             n.onclick = () => {
-                window.open(`flushtracker.html?id=${flush.id}`, '_blank');
+                window.open(`flushtracker.html?id=${encodeURIComponent(flush.id)}`, '_blank');
                 n.close();
             };
         }
@@ -254,20 +254,34 @@
             return { label: FLUSH_PHASES[idx].label, cls: STAGE_CLASSES[idx] };
         }
 
+        // Anyone can create a document in the flushes collection, so every field
+        // read back out of Firestore is untrusted input. Escape before it goes
+        // anywhere near innerHTML.
+        function esc(value) {
+            return String(value == null ? '' : value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
         function renderFeed() {
             const list = document.getElementById('feed-list');
             const rows = flushDocs.slice(0, MAX_FEED).map((f) => {
                 const stage = journeyStage(f.timestamp);
                 const icon = '🚽';
+                const id = esc(f.id);
+                const gallons = Number(f.gpf) > 0 ? Number(f.gpf) : GPF;
                 return `
-                <li class="px-4 py-3 flex items-center gap-3 ${f._isNew ? 'flush-arrive' : ''}" data-ts="${f.timestamp}">
+                <li class="px-4 py-3 flex items-center gap-3 ${f._isNew ? 'flush-arrive' : ''}" data-ts="${esc(f.timestamp)}">
                     <div class="w-9 h-9 rounded-full bg-amazon-grayBg flex items-center justify-center text-lg shrink-0">${icon}</div>
                     <div class="min-w-0 flex-1">
                         <div class="flex items-center gap-2 flex-wrap">
-                            <a href="flushtracker.html?id=${f.id}" class="font-mono font-bold text-sm text-amazon-blue hover:underline">${f.id}</a>
+                            <a href="flushtracker.html?id=${esc(encodeURIComponent(f.id))}" class="font-mono font-bold text-sm text-amazon-blue hover:underline">${id}</a>
                             <span class="text-[10px] font-bold px-2 py-0.5 rounded-full border ${stage.cls}">${stage.label}</span>
                         </div>
-                        <div class="text-xs text-gray-500 mt-0.5">${f.formatted_time || ''} · ${f.gpf || GPF} G flush</div>
+                        <div class="text-xs text-gray-500 mt-0.5">${esc(f.formatted_time || '')} · ${gallons} G flush</div>
                     </div>
                     <div class="text-xs text-gray-400 font-mono shrink-0 feed-rel">${relativeTime(f.timestamp)}</div>
                 </li>`;
@@ -395,7 +409,7 @@
                     refreshServerCounts(db);
                 }, (err) => {
                     console.error('Firestore listener error:', err);
-                    statusEl.innerHTML = `<i class="fa-solid fa-triangle-exclamation mr-2"></i>Connection error: ${err.message}`;
+                    statusEl.innerHTML = `<i class="fa-solid fa-triangle-exclamation mr-2"></i>Connection error: ${esc(err.message)}`;
                     document.getElementById('live-badge').classList.add('hidden');
                 });
         }
