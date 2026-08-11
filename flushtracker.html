@@ -42,6 +42,8 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
     <script src="firebase_config.js"></script>
+    <!-- Shared hydraulic model (route geometry + timing), also used by dashboard.html -->
+    <script src="flush_model.js"></script>
     <style>
         /* Custom scrollbar & leafet overrides */
         #map {
@@ -133,8 +135,44 @@
             </div>
         </section>
 
+        <!-- Looking up a tracking ID (shown between page load and the first Firestore response) -->
+        <section id="lookup-pending"
+            class="hidden bg-white rounded-xl p-6 amazon-shadow border border-gray-200 text-center">
+            <i class="fa-solid fa-circle-notch fa-spin text-2xl text-amazon-blue mb-3"></i>
+            <p class="text-sm font-semibold text-gray-700">Looking up <span id="lookup-pending-id"
+                    class="font-mono"></span>...</p>
+        </section>
+
+        <!-- Tracking ID could not be resolved -->
+        <section id="lookup-failed"
+            class="hidden bg-white rounded-xl p-6 sm:p-8 amazon-shadow border border-gray-200 text-center">
+            <div class="text-5xl mb-3" id="lookup-failed-icon">🧻</div>
+            <h2 class="text-lg sm:text-xl font-extrabold text-gray-900 mb-2" id="lookup-failed-title">
+                We couldn't find that flush
+            </h2>
+            <p class="text-sm text-gray-600 mb-1" id="lookup-failed-message">
+                No flush is registered under that tracking ID.
+            </p>
+            <p class="text-xs text-gray-400 font-mono mb-5" id="lookup-failed-id"></p>
+            <p class="text-xs text-gray-500 mb-5 max-w-md mx-auto" id="lookup-failed-hint">
+                Double-check the ID printed on your receipt — it looks like <span
+                    class="font-mono font-semibold">FLUSH-4E9A12</span>. If you just pressed the button, give it a few
+                seconds and refresh.
+            </p>
+            <div class="flex flex-wrap items-center justify-center gap-2">
+                <button type="button" onclick="window.location.reload()"
+                    class="bg-amazon-yellow hover:bg-amazon-yellowHover text-black text-xs font-bold py-2.5 px-5 rounded-lg border border-yellow-500 shadow-md transition-all active:scale-95">
+                    <i class="fa-solid fa-rotate-right mr-1.5"></i>Try again
+                </button>
+                <a href="flushtracker.html"
+                    class="bg-white hover:bg-gray-50 text-gray-700 text-xs font-bold py-2.5 px-5 rounded-lg border border-gray-300 shadow-sm transition-all active:scale-95">
+                    <i class="fa-solid fa-magnifying-glass mr-1.5"></i>Enter a different ID
+                </a>
+            </div>
+        </section>
+
         <!-- Live Tracking Sections Container (Shown when a flush is active) -->
-        <div id="live-tracking-sections" class="space-y-4">
+        <div id="live-tracking-sections" class="hidden space-y-4">
             <!-- Order Header Card -->
             <section class="bg-white rounded-xl p-4 sm:p-5 amazon-shadow border border-gray-200">
                 <div
@@ -150,7 +188,8 @@
                             <span>Origin: <span class="font-medium text-gray-700">1417 15th St, San Francisco, CA
                                     94103</span></span>
                             <span id="flush-id-badge"
-                                class="hidden text-[10px] bg-blue-100 text-amazon-blue px-2 py-0.5 rounded font-mono font-bold border border-blue-200 shadow-sm"></span>
+                                class="hidden text-[10px] bg-blue-100 text-amazon-blue px-2 py-0.5 rounded font-mono font-bold border border-blue-200 shadow-sm"><i
+                                    class="fa-solid fa-qrcode mr-1"></i><span id="flush-id-badge-text"></span></span>
                         </p>
                     </div>
                     <!-- Thumbnail preview icon -->
@@ -739,45 +778,9 @@
     </div>
 
     <script>
-        // Geographic path coordinates updated with user route points + final SF Bay Deepwater Outfall
-        const sewerPathCoordinates = [
-            [37.7666712, -122.4168153], // 1. 1417 15th St (Origin)
-            [37.7666118, -122.4176682], // 2. 15th St lateral segment
-            [37.7481885, -122.4159071], // 3. Mission / Bernal flow corridor
-            [37.7482562, -122.4083325], // 4. Channel Basin trunk conduit
-            [37.7495458, -122.4035045], // 5. Islais Creek basin corridor
-            [37.7496816, -122.3972817], // 6. Evans Ave approach
-            [37.7472386, -122.3961013], // 7. Phelps St headworks entrance
-            [37.7431662, -122.3886129], // 8. Southeast Wastewater Treatment Plant (SEP)
-            [37.75037559393314, -122.37329860682091] // 9. SF Bay Deepwater Outfall (800 ft offshore near Pier 80)
-        ];
-
-        // --- Hydraulic timing model ---
-        // Distances come from the route geometry itself; velocities set the clock.
-        function distanceFt(a, b) {
-            const R = 20902231; // Earth radius in feet
-            const toRad = (d) => d * Math.PI / 180;
-            const dLat = toRad(b[0] - a[0]);
-            const dLng = toRad(b[1] - a[1]);
-            const h = Math.sin(dLat / 2) ** 2 +
-                Math.cos(toRad(a[0])) * Math.cos(toRad(b[0])) * Math.sin(dLng / 2) ** 2;
-            return 2 * R * Math.asin(Math.sqrt(h));
-        }
-
-        function pathDistanceFt(points) {
-            let total = 0;
-            for (let i = 0; i < points.length - 1; i++) total += distanceFt(points[i], points[i + 1]);
-            return total;
-        }
-
-        const LATERAL_FT_PER_SEC = 2.5;  // 4-inch private lateral (gravity flow)
-        const MAINS_FT_PER_SEC = 8.0;    // Street mains & trunk lines
-
-        const LATERAL_FT = distanceFt(sewerPathCoordinates[0], sewerPathCoordinates[1]);      // ~250 ft
-        const MAINS_FT = pathDistanceFt(sewerPathCoordinates.slice(1, 8));                    // ~16,000 ft to SEP
-        const LATERAL_SEC = LATERAL_FT / LATERAL_FT_PER_SEC;                                  // ~100 s
-        const SEP_ARRIVAL_SEC = LATERAL_SEC + MAINS_FT / MAINS_FT_PER_SEC;                    // ~35 min
-        const TREATMENT_SEC = 24 * 3600;                                                      // 24 hr liquid cycle
+        // Route geometry (sewerPathCoordinates) and the hydraulic timing model
+        // (LATERAL_SEC / SEP_ARRIVAL_SEC / TREATMENT_SEC / flushProgress) now live in
+        // flush_model.js, shared with dashboard.html so the two pages cannot drift apart.
 
         // Step definitions with realistic hydraulic timing (~35 min transit at 8 ft/s mains, 24 hr liquid treatment)
         const stepData = [
@@ -832,7 +835,7 @@
         ];
 
         // Global variables for main map & simulator map polylines
-        let trackingStep = 2; // Default tracking step at SEP
+        let trackingStep = 0; // Neutral starting step; the real one comes from the flush record
         let simStep = 0;      // Simulator starting step
         let hasSimStarted = false; // Flag to hide Step 1 until simulation is triggered
         let currentWasteType = 'liquid'; // Waste type: 'liquid' or 'solid'
@@ -1008,6 +1011,76 @@
             return out;
         }
 
+        // Tracking IDs are always FLUSH- plus six uppercase hex digits (see
+        // generate_flush_id in pi_button.py). Anything else cannot exist.
+        const FLUSH_ID_PATTERN = /^FLUSH-[0-9A-F]{6}$/;
+
+        let trackingTicker = null;
+
+        function showTrackingView(view) {
+            const views = {
+                landing: document.getElementById('landing-banner'),
+                pending: document.getElementById('lookup-pending'),
+                failed: document.getElementById('lookup-failed'),
+                live: document.getElementById('live-tracking-sections')
+            };
+            Object.keys(views).forEach((name) => {
+                if (views[name]) views[name].classList.toggle('hidden', name !== view);
+            });
+
+            // Leaflet measures the container on init; because #map now starts hidden,
+            // both the size and the initial fitBounds have to be redone on reveal or
+            // the map renders as a zero-size grey box at the wrong zoom.
+            if (view === 'live' && mainMap) {
+                mainMap.invalidateSize();
+                if (mainDashedLine) {
+                    mainMap.fitBounds(mainDashedLine.getBounds(), { padding: [30, 30] });
+                }
+            }
+        }
+
+        function showLookupFailed(reason) {
+            const messages = {
+                malformed: {
+                    icon: '🔍',
+                    title: "That doesn't look like a tracking ID",
+                    message: 'Tracking IDs look like FLUSH- followed by six characters.'
+                },
+                missing: {
+                    icon: '🧻',
+                    title: "We couldn't find that flush",
+                    message: 'No flush is registered under that tracking ID.'
+                },
+                offline: {
+                    icon: '📡',
+                    title: "We couldn't reach the flush database",
+                    message: 'Something went wrong talking to FlushBase. Check your connection and try again.'
+                }
+            };
+            const copy = messages[reason] || messages.missing;
+
+            document.getElementById('lookup-failed-icon').textContent = copy.icon;
+            document.getElementById('lookup-failed-title').textContent = copy.title;
+            document.getElementById('lookup-failed-message').textContent = copy.message;
+            document.getElementById('lookup-failed-id').textContent = activeFlushId || '';
+
+            if (trackingTicker) {
+                clearInterval(trackingTicker);
+                trackingTicker = null;
+            }
+            showTrackingView('failed');
+        }
+
+        function onFlushDataLoaded(data) {
+            activeFlushData = data;
+            showTrackingView('live');
+            updateRealtimeTrackingUI();
+            if (!trackingTicker) {
+                // Update every second so the path tip crawls rather than jumps
+                trackingTicker = setInterval(updateRealtimeTrackingUI, 1000);
+            }
+        }
+
         function initFlushTracking() {
             const urlParams = new URLSearchParams(window.location.search);
             const urlFlushId = urlParams.get('id');
@@ -1015,61 +1088,67 @@
                 activeFlushId = urlFlushId.trim().toUpperCase();
             }
 
-            const landingBanner = document.getElementById('landing-banner');
-            const liveTrackingSections = document.getElementById('live-tracking-sections');
-            const badge = document.getElementById('flush-id-badge');
             const topNavContainer = document.getElementById('top-nav-tracking-container');
             const topNavIdEl = document.getElementById('top-nav-tracking-id');
 
-            if (activeFlushId) {
-                // User IS tracking a flush: Show live tracking, hide landing banner
-                if (landingBanner) landingBanner.classList.add('hidden');
-                if (liveTrackingSections) liveTrackingSections.classList.remove('hidden');
-
-                if (badge) {
-                    badge.innerHTML = `<i class="fa-solid fa-qrcode mr-1"></i> ${activeFlushId}`;
-                    badge.classList.remove('hidden');
-                }
-
-                if (topNavContainer) topNavContainer.classList.remove('hidden');
-                if (topNavIdEl) topNavIdEl.textContent = activeFlushId;
-
-                const inputEl = document.getElementById('tracking-input');
-                if (inputEl) inputEl.value = activeFlushId;
-
-                // Try Firebase Firestore Document Listen
-                if (typeof firebase !== 'undefined' && firebaseConfig && firebaseConfig.projectId !== "YOUR_PROJECT_ID") {
-                    try {
-                        if (!firebase.apps.length) {
-                            firebase.initializeApp(firebaseConfig);
-                        }
-                        const db = firebase.firestore();
-                        db.collection("flushes").doc(activeFlushId).onSnapshot((doc) => {
-                            if (doc.exists) {
-                                activeFlushData = doc.data();
-                                updateRealtimeTrackingUI();
-                            } else {
-                                fetchLocalFlushFallback(activeFlushId);
-                            }
-                        }, (err) => {
-                            console.warn("Firestore error:", err);
-                            fetchLocalFlushFallback(activeFlushId);
-                        });
-                    } catch (e) {
-                        console.error("Firebase init failed:", e);
-                        fetchLocalFlushFallback(activeFlushId);
-                    }
-                } else {
-                    fetchLocalFlushFallback(activeFlushId);
-                }
-
-                // Update every second so the path tip crawls rather than jumps
-                setInterval(updateRealtimeTrackingUI, 1000);
-            } else {
-                // User is NOT tracking a flush: Show Landing Banner, hide live tracking sections & top tracking ID
-                if (landingBanner) landingBanner.classList.remove('hidden');
-                if (liveTrackingSections) liveTrackingSections.classList.add('hidden');
+            if (!activeFlushId) {
+                // Not tracking anything — show the landing banner and the search form
+                showTrackingView('landing');
                 if (topNavContainer) topNavContainer.classList.add('hidden');
+                return;
+            }
+
+            const badge = document.getElementById('flush-id-badge');
+            const badgeText = document.getElementById('flush-id-badge-text');
+            if (badge && badgeText) {
+                // textContent, not innerHTML: this string comes straight from the URL
+                badgeText.textContent = activeFlushId;
+                badge.classList.remove('hidden');
+            }
+            if (topNavContainer) topNavContainer.classList.remove('hidden');
+            if (topNavIdEl) topNavIdEl.textContent = activeFlushId;
+
+            const inputEl = document.getElementById('tracking-input');
+            if (inputEl) inputEl.value = activeFlushId;
+
+            document.getElementById('lookup-pending-id').textContent = activeFlushId;
+
+            if (!FLUSH_ID_PATTERN.test(activeFlushId)) {
+                showLookupFailed('malformed');
+                return;
+            }
+
+            const firebaseReady = typeof firebase !== 'undefined' &&
+                typeof firebaseConfig !== 'undefined' && firebaseConfig &&
+                firebaseConfig.projectId !== 'YOUR_PROJECT_ID';
+
+            if (!firebaseReady) {
+                showLookupFailed('offline');
+                return;
+            }
+
+            // Nothing is shown as "in transit" until the record actually resolves —
+            // an unknown ID must never render a plausible-looking fake journey.
+            showTrackingView('pending');
+
+            try {
+                if (!firebase.apps.length) {
+                    firebase.initializeApp(firebaseConfig);
+                }
+                firebase.firestore().collection('flushes').doc(activeFlushId)
+                    .onSnapshot((doc) => {
+                        if (doc.exists) {
+                            onFlushDataLoaded(doc.data());
+                        } else {
+                            showLookupFailed('missing');
+                        }
+                    }, (err) => {
+                        console.warn('Firestore error:', err);
+                        showLookupFailed('offline');
+                    });
+            } catch (e) {
+                console.error('Firebase init failed:', e);
+                showLookupFailed('offline');
             }
         }
 
@@ -1078,65 +1157,40 @@
             const input = document.getElementById('tracking-input');
             if (!input || !input.value.trim()) return;
             const cleanId = input.value.trim().toUpperCase();
-            window.location.href = `flushtracker.html?id=${cleanId}`;
-        }
-
-        function fetchLocalFlushFallback(id) {
-            fetch('local_flushes.json')
-                .then(res => res.json())
-                .then(data => {
-                    if (data && data[id]) {
-                        activeFlushData = data[id];
-                        updateRealtimeTrackingUI();
-                    }
-                })
-                .catch(() => { });
+            window.location.href = `flushtracker.html?id=${encodeURIComponent(cleanId)}`;
         }
 
         function updateRealtimeTrackingUI() {
             if (!activeFlushData || !activeFlushData.timestamp) return;
 
-            const nowMs = Date.now();
-            const flushTimestampMs = Number(activeFlushData.timestamp);
-            const elapsedSec = Math.max(0, (nowMs - flushTimestampMs) / 1000);
+            const elapsedSec = elapsedSecSince(activeFlushData.timestamp);
+            const { phaseIndex, traveledFt, progressPercent } = flushProgress(elapsedSec);
 
-            let stepIdx = 0;
-            let currentPosition = sewerPathCoordinates[0];
-            let solidCoords = [sewerPathCoordinates[0]];
-            let progressPercent = 0;
+            let currentPosition;
+            let solidCoords;
 
-            if (elapsedSec < LATERAL_SEC) {
-                // Phase 1: Private lateral at ~2.5 ft/s (~100 s -> 0% to 10%)
-                stepIdx = 0;
-                const traveledFt = elapsedSec * LATERAL_FT_PER_SEC;
-                progressPercent = (elapsedSec / LATERAL_SEC) * 10;
+            if (phaseIndex === 0) {
+                // Private lateral at ~2.5 ft/s
                 solidCoords = pathUpToByDistance(sewerPathCoordinates.slice(0, 2), traveledFt);
                 currentPosition = solidCoords[solidCoords.length - 1];
-            } else if (elapsedSec < SEP_ARRIVAL_SEC) {
-                // Phase 2: Street mains & trunk lines at 8 ft/s (~35 min to SEP -> 10% to 68%)
-                stepIdx = 1;
-                const traveledFt = (elapsedSec - LATERAL_SEC) * MAINS_FT_PER_SEC;
-                progressPercent = 10 + ((elapsedSec - LATERAL_SEC) / (SEP_ARRIVAL_SEC - LATERAL_SEC)) * 58;
-                solidCoords = [sewerPathCoordinates[0]].concat(pathUpToByDistance(sewerPathCoordinates.slice(1, 8), traveledFt));
+            } else if (phaseIndex === 1) {
+                // Street mains & trunk lines at 8 ft/s
+                solidCoords = [sewerPathCoordinates[0]]
+                    .concat(pathUpToByDistance(sewerPathCoordinates.slice(1, SEP_COORD_INDEX + 1), traveledFt));
                 currentPosition = solidCoords[solidCoords.length - 1];
-            } else if (elapsedSec < SEP_ARRIVAL_SEC + TREATMENT_SEC) {
-                // Phase 3: 24-hour treatment at SEP (-> 68% to 95%)
-                stepIdx = 2;
-                const ratio = (elapsedSec - SEP_ARRIVAL_SEC) / TREATMENT_SEC;
-                progressPercent = 68 + (ratio * 27);
-                solidCoords = sewerPathCoordinates.slice(0, 8);
-                currentPosition = sewerPathCoordinates[7];
+            } else if (phaseIndex === 2) {
+                // Holding at the plant for the 24-hour treatment cycle
+                solidCoords = sewerPathCoordinates.slice(0, SEP_COORD_INDEX + 1);
+                currentPosition = sewerPathCoordinates[SEP_COORD_INDEX];
             } else {
-                // Phase 4: SF Bay Outfall Release (-> 100%)
-                stepIdx = 3;
-                progressPercent = 100;
+                // Discharged through the Pier 80 outfall
                 solidCoords = sewerPathCoordinates.slice();
-                currentPosition = sewerPathCoordinates[8];
+                currentPosition = sewerPathCoordinates[sewerPathCoordinates.length - 1];
             }
 
             // Sync visual stepper node FIRST (setStep snaps marker & line to the
             // step waypoint), then apply the smooth interpolated position on top
-            setStep(stepIdx);
+            setStep(phaseIndex);
 
             if (mainFlushMarker) {
                 mainFlushMarker.setLatLng(currentPosition);
@@ -1149,6 +1203,13 @@
             const fillEl = document.getElementById('progress-bar-fill');
             if (fillEl) {
                 fillEl.style.width = `${progressPercent.toFixed(1)}%`;
+            }
+
+            // The journey is over and nothing else will change — stop the 1 Hz
+            // redraw rather than burning a phone battery on a static page.
+            if (phaseIndex === 3 && trackingTicker) {
+                clearInterval(trackingTicker);
+                trackingTicker = null;
             }
         }
 
@@ -1198,7 +1259,7 @@
                 iconSize: [28, 28],
                 iconAnchor: [14, 14]
             });
-            mainSepPin = L.marker(sewerPathCoordinates[7], { icon: plantIcon }).addTo(mainMap)
+            mainSepPin = L.marker(sewerPathCoordinates[SEP_COORD_INDEX], { icon: plantIcon }).addTo(mainMap)
                 .bindPopup("<b>Southeast Treatment Plant (SEP)</b><br>750 Phelps St, SF");
 
             // Outfall Pin
@@ -1261,7 +1322,7 @@
                 iconSize: [28, 28],
                 iconAnchor: [14, 14]
             });
-            simSepPin = L.marker(sewerPathCoordinates[7], { icon: plantIcon }).addTo(simMap);
+            simSepPin = L.marker(sewerPathCoordinates[SEP_COORD_INDEX], { icon: plantIcon }).addTo(simMap);
 
             // Bay Outfall Pin
             updateBayOutfallMarker(simMap, false, simEndPin, (pin) => simEndPin = pin);

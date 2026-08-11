@@ -33,6 +33,7 @@ Live Dashboard: **[https://flushbase.web.app/dashboard.html](https://flushbase.w
 | `toilet.png` | Logo — used on the web pages AND printed on receipts (must be on the Pi too) |
 | `public/` | What Firebase Hosting actually deploys (see sync rule below) |
 | `firebase_config.js` | Firebase web credentials (shared by both pages) |
+| `flush_model.js` | Route geometry + hydraulic timing, shared by both pages (load it *before* the page script) |
 | `firestore.rules` | Public read/create, no update/delete. Creates are validated: ID shape, exact field set, types and ranges |
 | `local_flushes.json` | Local fallback DB when Firebase isn't configured |
 | `receipt_counter.json` | Persistent "satisfied customer #N" counter (lives on the Pi) |
@@ -43,6 +44,7 @@ Live Dashboard: **[https://flushbase.web.app/dashboard.html](https://flushbase.w
 > ```bash
 > cp flushtracker.html public/index.html
 > cp dashboard.html public/dashboard.html
+> cp flush_model.js public/flush_model.js
 > cp toilet.png public/toilet.png
 > firebase deploy --only hosting
 > ```
@@ -207,9 +209,14 @@ Two pages, both talking to the same Firestore `flushes` collection:
   real sewer route in real time. Timing is physics-derived — distances measured
   from the map route, ~2.5 ft/s in the house lateral, **8 ft/s in the mains**
   (≈35 min to SEP), then a 24-hour treatment cycle. Tune via the
-  `MAINS_FT_PER_SEC` constants in the script. Also contains the accelerated
-  liquid/solid simulator. Real flushes are type-agnostic ("1.6 G Flush") since
-  the button only senses the flush.
+  `MAINS_FT_PER_SEC` constants in **`flush_model.js`**. Also contains the
+  accelerated liquid/solid simulator. Real flushes are type-agnostic
+  ("1.6 G Flush") since the button only senses the flush.
+
+  The tracker shows the journey *only* once the record actually loads. An ID
+  that is malformed, unknown, or unreachable gets an explicit "we couldn't find
+  that flush" panel — never a plausible-looking journey for a flush that does
+  not exist.
 - **Dashboard** (`dashboard.html`): live feed of every flush with stats and
   journey stage. "Enable Notifications" uses the browser Notification API —
   fires whenever a flush lands *while the page is open* (background tab OK; no
