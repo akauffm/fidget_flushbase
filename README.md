@@ -31,16 +31,18 @@ Live Dashboard: **[https://flushbase.web.app/dashboard.html](https://flushbase.w
 | `flushtracker.html` | **Source** for the tracker web app |
 | `dashboard.html` | **Source** for the live flush dashboard |
 | `toilet.png` | Logo — used on the web pages AND printed on receipts (must be on the Pi too) |
-| `public/` | What Firebase Hosting actually deploys (see sync rule below) |
+| `public/` | What Firebase Hosting actually deploys — generated, don't edit by hand |
+| `sync-public.sh` | Copies the source files into `public/`; runs automatically before every deploy |
 | `firebase_config.js` | Firebase web credentials (shared by both pages) |
 | `flush_model.js` | Route geometry + hydraulic timing, shared by both pages (load it *before* the page script) |
 | `firestore.rules` | Public read/create, no update/delete. Creates are validated: ID shape, exact field set, types and ranges |
 | `local_flushes.json` | Local fallback DB when Firebase isn't configured |
 | `receipt_counter.json` | Persistent "satisfied customer #N" counter (lives on the Pi) |
 
-> **⚠️ Sync rule:** `public/index.html` is a *copy* of `flushtracker.html`, and
-> `public/dashboard.html` is a copy of `dashboard.html`. After editing the source
-> files, sync before deploying:
+> **Editing the web pages:** edit `flushtracker.html` and `dashboard.html` in the
+> repo root. `public/` holds generated copies (`public/index.html` *is*
+> `flushtracker.html`) and `sync-public.sh` refreshes them. It's registered as a
+> hosting `predeploy` hook in `firebase.json`, so a plain
 > ```bash
 > cp flushtracker.html public/index.html
 > cp dashboard.html public/dashboard.html
@@ -48,6 +50,8 @@ Live Dashboard: **[https://flushbase.web.app/dashboard.html](https://flushbase.w
 > cp toilet.png public/toilet.png
 > firebase deploy --only hosting
 > ```
+> re-syncs first and can't ship a stale page. Run `./sync-public.sh` yourself if
+> you want the copies updated without deploying.
 
 ---
 
@@ -192,8 +196,10 @@ ssh admin@pi3.local sudo systemctl restart flushtracker
 | `BUTTON_GPIO_PIN = 17` | Button GPIO (BCM numbering) |
 | `FIREBASE_PROJECT_ID` / `PUBLIC_HOST_URL` | Where flush records go / QR target URL |
 
-The toilet graphic prints 160px wide (the `target_width=160` in
-`print_receipt`); anything up to ~380 in steps of 8 works on 58mm paper.
+The toilet graphic prints 240px wide (the `target_width=240` passed to
+`pil_image_to_escpos_raster` in `print_receipt`; the QR code uses 256). Widths
+are clamped to the source image's own width and rounded down to a multiple of
+8, so with the 400x400 `toilet.png` anything up to ~380 works on 58mm paper.
 Receipt layout preview without a printer: run in workstation mode and press
 ENTER — the receipt text and an ASCII QR render in the terminal, and a copy is
 saved to `last_receipt.txt`.
@@ -223,7 +229,13 @@ Two pages, both talking to the same Firestore `flushes` collection:
   backend needed). True closed-browser push would require FCM + Cloud
   Functions (Blaze plan) — intentionally not built.
 
-Deploy (after the sync rule above): `firebase deploy --only hosting`
+There is no build step. Both pages load Tailwind, FontAwesome, Leaflet and the
+Firebase SDK (compat build, pinned at 10.7.1) directly from CDNs via script
+tags, and nothing is installed from npm at runtime — `package.json` carries
+deploy scripts only.
+
+Deploy: `firebase deploy --only hosting` (the predeploy hook syncs `public/`
+for you).
 
 Firestore layout — `flushes/{FLUSH-XXXXXX}`:
 `timestamp` (ms epoch, int) · `formatted_time` (string) · `gpf` (1.6) ·
